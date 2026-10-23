@@ -34,6 +34,7 @@ jobs:
           python analysis/fw_sensor.py
           python analysis/fw_patch.py
           python analysis/isp_gate.py
+          python analysis/fw_code.py
           python analysis/probe_radio.py
           python analysis/probe_cert.py
 
