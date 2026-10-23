@@ -47,3 +47,16 @@ jobs:
           print("image", got)
           assert got == want, "firmware image does not match the pin"
           PY
+
+      - name: Rebuild the flashed bake with the one-command builder
+        run: |
+          python analysis/fw_build.py "RAlt=Fn" "Fn=Right" "RShift=Up" "Menu=Left" \
+            "RCtrl=Down" "Fn+Right=VolUp" --fn-row 32 --name ci_bake
+          python - <<'PY'
+          import hashlib, pathlib
+          for name, want in (("ci_bake.bin", "617eef7f4bb4cd5ceecaaee5d4d54124836f9ba63691b17185e094c3c744cd16"),
+                             ("ci_bake.exe", "774bb728326c42e00f42f0da4fd7be8edacd2859037d09bfdc659d90fc5fe9a9")):
+              got = hashlib.sha256(pathlib.Path("analysis/out", name).read_bytes()).hexdigest()
+              print(name, got)
+              assert got == want, f"{name} does not reproduce the flashed bake"
+          PY

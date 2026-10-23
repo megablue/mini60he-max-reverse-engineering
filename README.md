@@ -144,15 +144,42 @@ Consequences worth knowing before patching:
 
 ## Building a modification
 
+One command turns remap requests into a firmware image plus a patched updater:
+
 ```powershell
-# 1. plan a remap (read-only; prints the exact bytes for BOTH tables it must touch)
+python analysis/fw_build.py "CapsLock=Esc" "Menu=Left"
+python analysis/fw_build.py "CapsLock=Esc" "Fn+Z=PlayPause"
+# -> analysis/out/fw_custom.bin        the image
+#    analysis/out/fw_custom.exe        the vendor updater with that image swapped in
+#    analysis/out/fw_custom_build.txt  what changed and what the key will send
+```
+
+Two request kinds, both table data: `KEY=TARGET` changes what a physical key sends,
+`Fn+KEY=ACTION` spends a free row of the Windows Fn overlay (`ACTION` is a media, OS or
+Bluetooth action such as `VolUp`, `PlayPause`, `Mac`, `BT2`).
+
+`fw_build.py` resolves each key through the stock map, edits the per-key **catalog** at `0x9600`
+(what a key actually emits) and keeps the `0x16DDA` pair table in step (the Fn layer's reverse
+lookup), refuses an edit that would create a new duplicate usage, and asserts the finished diff is
+exactly its own edit set. `--dry-run` prints the plan, `--no-exe` stops at the image, `--list`
+prints the current id map, `--name` picks the output stem, `--fn-row N` pins the overlay row
+instead of spending the first unreachable one.
+
+It reproduces the flashed bake exactly: the six requests that describe it (`RAlt=Fn`, `Fn=Right`,
+`RShift=Up`, `Menu=Left`, `RCtrl=Down`, `Fn+Right=VolUp --fn-row 32`) give image `617eef7f…` and
+exe `774bb728…`, the same two files `fw_bake3.py` writes.
+
+The lower-level pieces remain for changes that do not fit the remap model:
+
+```powershell
+# plan only, no file written: prints the bytes for BOTH tables a remap must touch
 python analysis/fw_remap.py "CapsLock=Esc" "Menu=Left"
 
-# 2. bake edits into the image and wrap them into a flasher copy
-python analysis/fw_bake3.py                 # current edit list -> analysis/out/fw_bake3.bin + ..._bake3.exe
+# the earlier hand-written bake (5 remaps + the Fn+Right layer row)
+python analysis/fw_bake3.py
 
-# 3. or wrap any image you already have
-python analysis/mkflasher.py analysis/out/fw_bake3.bin --out analysis/out/my_mod.exe
+# wrap any image you already have
+python analysis/mkflasher.py analysis/out/fw_custom.bin --out analysis/out/my_mod.exe
 ```
 
 `mkflasher.py` locates RCDATA `0xFA0` by walking the resource tree (currently file `0x1BAA4C`),
@@ -245,7 +272,9 @@ transcripts and the built installers land, and every one of them is reproducible
 | `fw_keys.py` | key pipeline: scan grid, usage table, Fn overlays, actuation, mode byte |
 | `fw_patch.py` | patch-target inventory: tables, code constants, gates |
 | `fw_remap.py` | remap **planner**: resolves `key -> key`, validates, prints both byte edits (pair table + catalog) |
-| `fw_bake3.py` | builds the current bake: applies the edit list, asserts anchors, wraps the exe |
+| `fw_build.py` | remap **builder**: requests -> image -> patched updater, with the diff asserted |
+| `fw_names.py` | the shared usage vocabulary (HID names + aliases such as `Fn`, `RightArrow`, `Bksp`) |
+| `fw_bake3.py` | builds the earlier hand-written bake: applies the edit list, asserts anchors, wraps the exe |
 | `mkflasher.py` | generic wrapper: any `0x7E000` image -> patched updater + manifest |
 | `isp_*.py` | ISP protocol: frame format, `AA 55` command table, password payload, upload flow, gates |
 

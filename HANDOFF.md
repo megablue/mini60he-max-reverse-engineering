@@ -13,6 +13,17 @@ As of 2026-10-24.
 
 ## State
 
+There is now one command from "I want this key to do that" to a flashable
+installer: `analysis/fw_build.py`. `KEY=TARGET` rewrites the catalog byte that a
+key emits plus the pair row the Fn lookup reads; `Fn+KEY=ACTION` spends a free
+row of the Windows Fn overlay. It asserts that the finished diff is exactly its
+own edit set, and it replays the flashed 12-byte bake byte for byte (image
+`617eef7f…`, exe `774bb728…`), which is the acceptance test. The usage
+vocabulary shared with the planner moved to `analysis/fw_names.py`. Tier A
+entry 1 in [the backlog](docs/PLAN.html#backlog) is closed. Docs: the worked
+remap in [Modification surface](docs/features/mod-surface.html#remap-plan) now
+shows the two-byte edit and the builder.
+
 One write has happened: the four-byte image was flashed on 2026-10-22. The device
 is fine, its settings pages were wiped, the Fn-row byte is live and the two
 usage-table bytes changed nothing. The corrected catalog bake (`bake3`) is built

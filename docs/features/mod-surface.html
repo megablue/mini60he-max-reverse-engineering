@@ -18,7 +18,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <body>
 <article class="map page">
 <h1>Modification surface — where a patch goes in RCDATA 4000, and what gates it</h1>
-<p class="status">Status: phase-5 inventory (data hooks, LED value tables, code constants and the four gates pinned byte-exactly, plus a remap planner that plans byte edits), the Fn action enum decoded, and one write on hardware: the four-byte bake was flashed 2026-10-22 and showed that the key catalog at <code>0x9600</code>, not the <code>0x16DD8</code> usage table, is the output path; the corrected 12-byte catalog bake is built (<code>MINI60HE_max_bake3.exe</code>), not flashed · Read when: choosing a modification, planning a specific key remap, computing a patch offset, decoding an Fn output byte, or checking what a byte edit would break</p>
+<p class="status">Status: phase-5 inventory (data hooks, LED value tables, code constants and the four gates pinned byte-exactly), the Fn action enum decoded, a one-command builder (<code>fw_build.py</code>: requests in, image plus wrapped updater out, diff asserted), and one write on hardware: the four-byte bake was flashed 2026-10-22 and showed that the key catalog at <code>0x9600</code>, not the <code>0x16DD8</code> usage table, is the output path; the corrected 12-byte catalog bake is built (<code>MINI60HE_max_bake3.exe</code>), not flashed · Read when: choosing a modification, planning or building a specific key remap, computing a patch offset, decoding an Fn output byte, or checking what a byte edit would break</p>
 
 <section id="what-it-is">
   <h2>What it is</h2>
@@ -51,19 +51,27 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 </section>
 
 <section id="remap-plan">
-  <h2>Worked remap plan — CapsLock sends Esc</h2>
-  <p><code>analysis/fw_remap.py</code> → <code>analysis/out/fw_remap.txt</code> is the planner: it resolves a request like <code>{"key": "CapsLock", "to": "Esc"}</code> through the current map, validates it, and prints the byte edits. It never writes an image — building one is phase 6.</p>
-  <pre class="verbatim" data-why="these are the exact image bytes an edit changes">
-id 0x30 currently sends 0x39 (CapsLock)
-usage byte for id 0x30 sits at  0x16E3B   (0x16DDA + 2*index, index 48)
+  <h2>Worked remap — CapsLock sends Esc</h2>
+  <p>One command builds it: <code>python analysis/fw_build.py "CapsLock=Esc"</code> writes <code>out/fw_custom.bin</code>, <code>out/fw_custom.exe</code> (the vendor updater with that image in <code>RCDATA 4000</code>) and a build report. A remap is <strong>two bytes</strong>, because two tables have to keep agreeing: the catalog at <code>0x9600 + id*4</code> is what the key actually emits, and the pair row at <code>0x16DDA + 2*index</code> is what the Fn layer's reverse lookup reads.</p>
+  <pre class="verbatim" data-why="the exact bytes an edit changes, as image offsets">
+id 0x30 currently sends 0x39 (CapsLock); it should send 0x29 (Esc)
 
-0x16E33  30 2d 5f 2e 60 2f 61 30 [39] 31 04 32 16 33 07 34   before
-0x16E33  30 2d 5f 2e 60 2f 61 30 [29] 31 04 32 16 33 07 34   after
+catalog  0x096C2   39 -> 29     (0x9600 + 0x30*4 + 2, the live output path)
+pair     0x16E3B   39 -> 29     (0x16DDA + 2*48 + 1, index 48)
 </pre>
   <ul>
-    <li><strong>One byte.</strong> Length, checksum and every other field are untouched; the version word below <code>0x16A96</code> keeps its value.</li>
-    <li><strong>Validation the planner reports.</strong> The target id must appear in the scan grid (id <code>0x30</code> does), the new usage must not be <code>0x00</code>, and a duplicate is flagged only when the edit <em>creates</em> one — here usage <code>0x29</code> already belongs to id <code>0x00</code>, so the report says "merges onto ids 00, 30": two keys with one function, which is the intent.</li>
-    <li><strong>Swaps</strong> are two requests in the same list; the plan is computed from the original table in one pass, so order does not matter.</li>
+    <li><strong>Nothing else moves.</strong> Length, tail magic and the other tables are untouched; the version word below <code>0x16A96</code> keeps its value, so the chip gate sees the same image it always saw. The builder asserts that the finished diff is exactly its own edit set.</li>
+    <li><strong>Swaps</strong> are two requests in one run; each is resolved against the stock map, so order does not matter. <code>--list</code> prints the current id map, <code>--dry-run</code> prints the plan.</li>
+  </ul>
+  <h3>What the builder refuses</h3>
+  <ul>
+    <li>Ids with no scan position (<code>0x58</code>–<code>0x5B</code> are table-only), a usage of <code>0x00</code>, a catalog record that is not kind 2, and two requests touching one id.</li>
+    <li>An edit that would <em>create</em> a duplicate usage. A duplicate that already exists is only a note — here <code>0x29</code> also belongs to id <code>0x00</code>, so Esc ends up on two ids, which is the intent.</li>
+    <li>A <code>Fn+KEY</code> request whose key no physical id sends: the combination could never fire.</li>
+  </ul>
+  <h3>Fn rows and spare ids</h3>
+  <ul>
+    <li><strong>Fn rows.</strong> <code>"Fn+Z=PlayPause"</code> spends one unreachable overlay row (first free by default, <code>--fn-row</code> to pin) and writes the same two bytes row 32 took for Fn+Right = Volume Up.</li>
     <li><strong>Free rows.</strong> Ids <code>0x0D</code>, <code>0x0E</code>, <code>0x0F</code>, <code>0x60</code>, <code>0x71</code>, <code>0x72</code>, <code>0x78</code> send usage <code>0x00</code>; none is physical, so they are spare table rows rather than spare keys.</li>
     <li><strong>Unverified.</strong> Nothing shows the companion app writing a keymap at runtime; if it does, a firmware-side edit could be overridden. That needs a capture, not more static analysis.</li>
   </ul>

@@ -117,12 +117,12 @@ modification surface — every patch target byte-exact, <code>out/fw_patch.txt</
 and <code>isp_gate.py</code> (chip-record table and the RCDATA size gate,
 <code>out/isp_gate.txt</code>). <code>fw_remap.py</code> is the remap planner:
 it resolves a requested key mapping, validates it and prints the byte edits
-(<code>out/fw_remap.txt</code>), never writing an image.
-<code>fw_volpatch.py</code> is the one script that does build an image — the
-first patch (Fn + Right Arrow = Volume Up): it asserts every precondition,
-changes the two Fn-map bytes and writes <code>out/fw_volplus.bin</code> plus a
-diff/verify report (<code>out/fw_volpatch.txt</code>). It reads
-<code>analysis/out/rcdata_4000.bin</code> and never touches <code>bin/</code>.
+(<code>out/fw_remap.txt</code>), never writing an image. <code>fw_build.py</code>
+is the one-command builder: requests in (<code>"CapsLock=Esc"</code>), a patched
+image and a wrapped updater out, with the finished diff asserted against its own
+edit set; <code>fw_names.py</code> holds the usage vocabulary both of them share.
+<code>fw_bake3.py</code> and <code>fw_volpatch.py</code> are the earlier
+hand-written bakes and stay as the record of what was flashed.
 </li>
 <li>Analysis artifacts (disassemblies, unpacked payloads, scratch tooling,
 reports) get top-level directories when created, each with a bullet here in
