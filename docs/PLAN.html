@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini60HE Max Firmware Reverse Engineering — plan</title>
+<meta name="generator" content="html-as-doc">
+<meta name="doc-source" content="docs/PLAN.md">
+<style>
+:root{color-scheme:light dark;--fg:#1d2433;--muted:#5b6475;--bg:#fff;--panel:#f7f9fc;--line:#d8dee9;--accent:#0b6e99;--code:#f4f6fa;--warn:#8a5a00}
+@media (prefers-color-scheme:dark){:root{--fg:#e6eaf2;--muted:#9aa4b8;--bg:#11151c;--panel:#161c25;--line:#2b3342;--accent:#6cc4e8;--code:#1a202a;--warn:#e0b25c}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:54rem;padding:2.5rem 1.25rem 5rem;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+main{display:block}
+h1,h2,h3,h4{line-height:1.25;margin:2.2rem 0 .8rem;scroll-margin-top:1rem}
+section{scroll-margin-top:1rem}
+h1{font-size:1.95rem;border-bottom:2px solid var(--line);padding-bottom:.45rem;margin-top:0}
+h2{font-size:1.4rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+h3{font-size:1.12rem}
+h4{font-size:1rem;color:var(--muted)}
+p,ul,ol,table,pre,blockquote{margin:.8rem 0}
+a{color:var(--accent);text-decoration-thickness:.06em;text-underline-offset:.15em}
+a:hover{text-decoration-style:dotted}
+code{background:var(--code);padding:.12em .34em;border-radius:.25rem;font:0.9em/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:.45rem;padding:.85rem 1rem;overflow:auto}
+pre code{background:none;padding:0;font-size:.875rem;line-height:1.55}
+pre.code[data-lang]::before{content:attr(data-lang);position:absolute;top:0;right:0;padding:.15rem .5rem;border-left:1px solid var(--line);border-bottom:1px solid var(--line);border-radius:0 .45rem 0 .45rem;background:var(--panel);color:var(--muted);font:600 .68rem/1.4 ui-monospace,monospace;text-transform:lowercase;letter-spacing:.03em}
+pre.verbatim{border-left:4px solid var(--warn)}
+pre.verbatim::before{content:"verbatim — " attr(data-why);display:block;color:var(--warn);font:600 .76rem/1.4 ui-monospace,monospace;margin-bottom:.5rem;white-space:pre-wrap}
+pre.mermaid{background:var(--bg);border:1px dashed var(--line)}
+table{border-collapse:collapse;width:100%;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:.45rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}
+blockquote{margin-left:0;padding:.1rem 0 .1rem 1rem;border-left:3px solid var(--line);color:var(--muted)}
+blockquote>:first-child{margin-top:0}
+blockquote>:last-child{margin-bottom:0}
+hr{border:0;border-top:1px solid var(--line);margin:2.4rem 0}
+ul,ol{padding-left:1.6rem}
+li{margin:.25rem 0}
+li>ul,li>ol{margin:.25rem 0}
+li.task{list-style:none;margin-left:-1.35rem}
+li.task input{margin-right:.5rem}
+img{max-width:100%;height:auto}
+.doc-header{color:var(--muted);font-size:.82rem;margin-bottom:2rem;display:flex;flex-wrap:wrap;gap:.4rem .75rem;align-items:baseline}
+.doc-header .doc-kicker{margin:0}
+.doc-header code{font-size:.95em}
+.doc-footer{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.8rem}
+.doc-footer p{margin:.25rem 0}
+.skip-link{position:absolute;left:-999px}
+.skip-link:focus{left:1rem;top:1rem;background:var(--panel);padding:.5rem;border-radius:.3rem;z-index:9}
+@media print{:root{--bg:#fff;--fg:#000}body{max-width:none;padding:0}.doc-header,.doc-footer{color:#444}pre,table,blockquote{break-inside:avoid}}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="doc-header">
+<p class="doc-kicker">Source of truth: this HTML page; <code>PLAN.md</code> is a pointer stub</p>
+</header>
+<main id="content">
+<h1 id="plan">Plan</h1>
+<p>This page is how this project moves forward: the goal, the fences nobody crosses, the six phases, and where the work actually stands. Findings live in the feature pages, process and hard rules in <code>AGENTS.md</code>, verified behavior in <code>docs/SPEC.md</code>, session state in <code>HANDOFF.md</code> — this page only decides <strong>what happens next</strong>.</p>
+<section id="goal">
+<h2>Goal</h2>
+<p>Reverse engineer the Mini60 HE Max updater executable — a SONiX USB MCU ISP Tool (<code>bin/MINI 60 HE MAX_V1.52.exe</code>, hash-pinned on <a href="features/binary-evidence.html">Binary evidence</a>) — and the keyboard firmware image embedded inside it, so keyboard functionality can be modified later. Per the user (2026-10-22), explore and decode first; afterward all three modification areas are on the table: <strong>key remapping</strong>, <strong>lighting/RGB</strong>, and <strong>performance</strong> (debounce/polling).</p>
+<p>The analysis is read-only for as long as the keyboard is this machine's daily driver, and the updater is never a program we run — it is data we parse.</p>
+</section>
+<section id="fences">
+<h2>Fences</h2>
+<p>Every phase runs inside these. A task that cannot be done inside them waits.</p>
+<ol>
+<li><strong>Never execute the updater.</strong> No run of <code>bin/*.exe</code>, no installer, no drive-by invocation; static parsing only (Python via stdin here-strings, PE/zip resource parsing).</li>
+<li><strong>No device contact while the keyboard is the daily driver.</strong> The HID surface is studied statically — feature-report IDs read out of the disassembly; nothing enumerates, opens or talks to the HID interface.</li>
+<li><strong>The binary stays immutable and hash-pinned.</strong> Every claim traced to the exe cites the SHA-256 pin, re-derived before publishing (<code>AGENTS.md</code> hard rules; the <a href="features/binary-evidence.html">Binary evidence</a> page owns the pin).</li>
+<li><strong>Phases 1–5 write no firmware anywhere.</strong> Building a patched image and any flashing is phase 6, explicitly user-gated. The updater has <strong>no flash-read command</strong> (see <a href="features/isp-protocol.html">ISP protocol</a>), so the pre-flash backup is the factory image RCDATA 4000 kept outside the keyboard — not a device dump — and equality with the device cannot be proven with this tool.</li>
+</ol>
+</section>
+<section id="starting-point">
+<h2>Where the analysis starts</h2>
+<p>Census-level facts gathered by read-only probes; as of the phase-1 sweep they all live on disk (see <a href="features/binary-evidence.html">Binary evidence</a> and <a href="features/fw-image.html">Firmware image</a>). They are observations backed by runnable extraction, not verified analysis — phases 2–5 later promoted or corrected several of them, and the linked pages carry the current status.</p>
+<ul>
+<li><strong>Pinned binary:</strong> 2,386,384 bytes, PE FileVersion 2.1.2.13, SHA-256 <code>958A39951D2F908A7FE925E0FA598C321924CB235239BF37484AE7C8213512D6</code>; ProductName/CompanyName strings are empty while the version resource reports 2.1.2.13.</li>
+<li><strong>Identity:</strong> a SONiX USB MCU ISP Tool — MFC C++ x86 (VS2008), not packed, no .NET; About box says 2.1.2.7. Authenticode signer (verified, <code>analysis/probe_cert.py</code>): Chinese FINDER(Dongguan) Technology Co., Ltd. — C=CN, serialNumber 91441900MA544M5385 — issued by Sectigo Public Code Signing CA EV R36 under EV policy <code>2.23.140.1.3</code>, valid 2025-01-08 → 2027-01-08, SHA-1 thumbprint <code>B2DD667C67925DD4E7F0EC5F3479F26C26CAB3F1</code>; DigiCert RFC 3161 timestamp <code>2026-01-21 09:46:42Z</code>. The signing identity answers who built this copy, not who authored the tool.</li>
+<li><strong>Target as configured:</strong> SONiX SN34F280 board <code>108A</code> — VID <code>0x0C45</code>, PID <code>0x80A1</code>, firmware file <code>108ASN34F280_User.hex</code> / <code>SN34F280_User.hex</code>, default ISP password <code>12345678</code>; strings cover the SN8F2250/SN8F2280/SN8F5280/SN8F22E90 family. The signer is the manufacturer, not the tool&#39;s author, and the embedded firmware carries the product string <code>MINI60HE MAX</code> — the name is no longer file-name-only.</li>
+<li><strong>Embedded resources:</strong> RCDATA id 4000 = <code>0x7E000</code> bytes (516,096; entropy 1.74 — not encrypted), first dwords <code>f8760020 05020000 1b020000 8d510000 1f02…</code> (index-like head); ids 4007–4016 carry the config strings (<code>4007</code>=12345678, <code>4008</code>=0C45, <code>4009</code>=80A1, <code>4010</code>=SN34F280, <code>4014</code>=108A, <code>4016</code>=SN34F280_User.hex); id 4011 is a zip holding updater skin assets.</li>
+<li><strong>Device face:</strong> HID feature reports only — <code>HidD_*</code>, <code>HidP_*</code>, setupapi enumeration; nothing else device-facing.</li>
+</ul>
+</section>
+<section id="phases">
+<h2>The six phases</h2>
+<table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Work</th>
+<th>Exit when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1 — Workspace &amp; extraction</td>
+<td>Stand up <code>analysis/</code> and a repeatable <code>probe_pe.py</code> that parses the exe statically: imports, ASCII+UTF-16 strings, RT_STRING tables, the RCDATA dump (4000, 4007–4016, 4011 zip inflated), the PKCS#7 overlay. <code>AGENTS.md</code> gains the <code>analysis/</code> layout bullet.</td>
+<td><code>probe_pe.py</code> re-run from scratch reproduces every extracted artifact, and the census facts above are persisted (refresh the stale "nothing deeper has been read" line on Binary evidence).</td>
+</tr>
+<tr>
+<td>2 — Decode RCDATA 4000</td>
+<td>Validate the vector-table hypothesis (SP <code>0x200076F8</code>, reset entry <code>0x205</code> Thumb, tail <code>55 55 AA AA</code>) with capstone ARM Cortex-M/Thumb; decode the index-like head into a flash-region map; identify the checksum and firmware-version fields.</td>
+<td><code>docs/features/fw-image.html</code> holds a verified flash-region map and the checksum algorithm, marked fact vs hypothesis.</td>
+</tr>
+<tr>
+<td>3 — Map the ISP protocol</td>
+<td>Static walk of <code>ISP_Command</code> and <code>CSN8F2250_ISPDlg</code>: feature-report IDs, the <code>12345678</code> handshake, <code>CheckBootLoaderID</code>, the firmware-version high-word gate, the checksum flow (<code>'SN8 Check Sum : %.4X'</code>), encryption-algorithm commands, special VID/PID branching, and why the tool is FINDER-signed.</td>
+<td><code>docs/features/isp-protocol.html</code>: command table and report IDs, all derived from code, zero device traffic.</td>
+</tr>
+<tr>
+<td>4 — Locate modulation targets</td>
+<td>Inside the phase-2 image: keymap tables, matrix scan loop, lighting/RGB engine, debounce/polling constants. Cross-reference what phase 3 could reconfigure live versus what requires a flash.</td>
+<td>An annotated candidate-address list plus a "live vs flash" summary the user can decide modification priorities against.</td>
+</tr>
+<tr>
+<td>5 — Documentation sweep</td>
+<td>Contemporaneous by default; this pass checks nothing durable is left behind: the two feature pages above, <code>SPEC.html</code> rows for verified user-visible behavior, <code>HANDOFF.md</code> state, feature-map index rows.</td>
+<td>Every fact in this page's start list is traceable to a page in <code>docs/</code>, not to session memory.</td>
+</tr>
+<tr>
+<td>6 — Gated: patched image</td>
+<td>One small, deliberately minimal patch candidate with its checksum/version fix. The stock image (RCDATA 4000) is kept outside the keyboard; the first flash is that unmodified image on a second unit, proving the write path with zero behavior change. A recovery path is demonstrated before any modified image is tried. Flash only after an explicit user go, on a lab setup.</td>
+<td>A user-approved flash happens, or the phase stays closed. Never opened while phases 1–5 are running. The specified candidate is <a href="#first-patch">Fn + Right Arrow = Volume Up</a>.</td>
+</tr>
+</tbody>
+</table>
+<p>Order: 1 → 2, then 3 can run while phase 4's early recon begins. Phase 5 is continuous but spelled out as a sweep so it is never skipped.</p>
+</section>
+<section id="first-patch">
+<h2>The first patch: Fn + Right Arrow = Volume Up</h2>
+<p>The concrete candidate for phase 6. It needs no code, no relocation and no added length: four bytes — two inside the Fn map in a row <strong>no physical key can reach</strong>, and two in the usage table so the chord does not depend on the app's NVM remap.</p>
+<table>
+<thead>
+<tr><th>Item</th><th>Value</th></tr>
+</thead>
+<tbody>
+<tr><td>Goal</td><td>The owner's Fn key held + Right Arrow produces Volume Up, with no app-side remap active</td></tr>
+<tr><td>Edit 1</td><td><code>0x16C7E</code>: <code>4C</code> → <code>4F</code> — row 32 input, Insert → Right Arrow</td></tr>
+<tr><td>Edit 2</td><td><code>0x16C7F</code>: <code>49</code> → <code>B9</code> — row 32 output, Delete → Volume Up</td></tr>
+<tr><td>Edit 3</td><td><code>0x16E83</code>: <code>E6</code> → <code>AF</code> — usage table id <code>0x54</code> (old <code>RAlt</code> position) becomes Fn</td></tr>
+<tr><td>Edit 4</td><td><code>0x16E85</code>: <code>AF</code> → <code>4F</code> — usage table id <code>0x55</code> (stock Fn position) becomes Right Arrow</td></tr>
+<tr><td>Why rows 3/4</td><td>Fn-held is keyed on the usage value <code>0xAF</code>, not on an id: the key at the old <code>RAlt</code> position already produces <code>Fn+1 = F1</code> on this keyboard only because an app remap put <code>0xAF</code> on it. Baking the swap in makes the image self-contained — an ISP reflash would otherwise wipe the NVM pages the remap lives in.</td></tr>
+<tr><td>Why row 32</td><td>Of 51 rows, only rows 1–12 (<code>F1..F12</code>; a 60% has no F-row) and row 32 (<code>0x4C</code> Insert; no such key) are unreachable. Repurposing row 32 costs nothing.</td></tr>
+<tr><td>Why <code>0xB9</code></td><td>The Fn output byte is a vendor enum, not a HID usage: <code>0x16BF6</code> is indexed as <code>0xB0 + k</code> into consumer usages. <code>0xB9</code> → <code>0x00E9</code> Volume Up. Four members confirmed on the keyboard (0xB0 next, 0xB1 prev, 0xB3 play/pause, 0xB5 mute).</td></tr>
+<tr><td>Invariants</td><td>Length unchanged (size gate cannot trip), row count stays 51, every byte below <code>0x16A96</code> identical (version words), no other id carrying <code>0xE6</code>/<code>0xAF</code>/<code>0x4F</code> left behind (asserted), no id gains or loses its scan position (per-key actuation records stay put).</td></tr>
+</tbody>
+</table>
+<h3>Test ladder</h3>
+<ol>
+<li><strong>Zero risk, on stock firmware:</strong> <code>Fn+F12</code>. The factory image already maps it to <code>0xB9</code>, so a volume change proves the enum and the Fn input path on hardware before anything is written.</li>
+<li><strong>Artifact (built):</strong> <code>analysis/fw_volpatch.py</code> → <code>out/fw_volplus.bin</code> and <code>out/fw_volpatch.txt</code>; it asserts every invariant above, including that no other id carries the swapped usages. Result: exactly four bytes differ, length unchanged, sha256 <code>ac46b5aa…</code>. <code>--chord-only</code> builds the two-byte variant for use only while the app remap is guaranteed to stay. It never touches <code>bin/</code>.</li>
+<li><strong>Gated flash</strong>, then <code>Fn+Right</code> = Volume Up while every stock Fn combo still behaves — and the old <code>RAlt</code> position is now Fn, the old Fn position now Right Arrow.</li>
+</ol>
+<h3>What the bake costs</h3>
+<p>Right Alt and the factory Fn position disappear as such: the two physical keys take the swapped roles. Nothing else changes, and no per-key setting has to be re-entered, because ids keep their scan positions. If the owner ever wants the stock roles back, the factory RCDATA is the copy that was flashed.</p>
+<h3>Before the write</h3>
+<ul>
+<li>The app's remaps and the owner's macro live in the NVM pages <code>0xB000</code>/<code>0xB600</code>, <em>inside</em> the span the ISP tool writes, so a flash erases them. The bake does not depend on the app's right-arrow remap any more (edits 3/4 put the usage in the image), but the macro and any other remap have to be re-applied after the flash.</li>
+<li>Open: whether the Fn lookup sees the app-remapped usage or the pre-remap one. Fallback if the chord stays silent — repoint that key's scan position to id <code>0x5B</code>, one byte.</li>
+<li>Rollback is the factory image itself: <code>RCDATA 4000</code>, SHA-256 <code>06a1a474…a88e0</code>, kept in the exe and in <code>analysis/out/fw_stock.bin</code>.</li>
+</ul>
+<h3>Gates</h3>
+<p>The user go was given on 2026-10-24 for the second-unit path; the rest stands: the first write is an <em>unmodified</em> image, proving the write path with zero behavior change, and the daily driver is never the first device. Recovery from an interrupted write is still not demonstrated, which is why the spare unit goes first.</p>
+</section>
+<section id="flash-runbook">
+<h2>Flash runbook (second unit)</h2>
+<p>Two artifacts, both <code>0x7E000</code> raw binaries, both loadable through the tool's <em>open file</em> dialog:</p>
+<ul>
+<li><strong>Factory:</strong> <code>analysis/out/fw_stock.bin</code> — copy of <code>RCDATA 4000</code>, SHA-256 <code>06a1a474…a88e0</code>. Flash this first.</li>
+<li><strong>Bake:</strong> <code>analysis/out/fw_volplus.bin</code> — the four-byte image above, SHA-256 <code>ac46b5aa…597b66</code>. Flash this second, only after the factory run behaves.</li>
+</ul>
+<h3>Container: <code>.bin</code> is supported, not a fallback</h3>
+<p>The dialog filter is <code>*.hex,*.bin</code>. The handler at <code>0x423B90</code> matches <code>L".hex"</code> then <code>L".bin"</code> against the chosen path and stores 1 or 2 at dialog <code>+0x428</code>; the <code>.bin</code> branch memsets the 1 MiB firmware buffer (fill <code>0xFF</code> for this chip family) and reads the file into the same pointer the bundled-RCDATA loader uses, <code>[dialog+0x1E44]</code> — the pointer the upload flow at <code>0x401100</code> reads. So a raw <code>.bin</code> reaches the writer; no Intel-HEX wrapper is needed.</p>
+<h3>Order</h3>
+<ol>
+<li>Spare unit only, on a wired connection, tool not otherwise touching the daily driver.</li>
+<li>Flash <code>fw_stock.bin</code>. Note the version and checksum strings the tool reports.</li>
+<li>Verify stock behaviour: typing, <code>CapsLock</code> toggle, <code>Fn+F12</code> = volume up, <code>Fn+S</code>/<code>Fn+D</code>/<code>Fn+A</code> = Mac/Windows/Android.</li>
+<li>Flash <code>fw_volplus.bin</code>. Same checks, then <code>Fn+Right</code> = volume up, old Fn key = Right Arrow, old <code>RAlt</code> position = Fn.</li>
+<li>Re-create the owner's app-side macro/remap afterwards: the NVM pages are inside the written span.</li>
+</ol>
+<h3>Stop if</h3>
+<ul>
+<li>The tool reports a version or checksum that differs from the stock run — the loaded file is not what it should be.</li>
+<li>The tool reports <em>Firmware Version is not for this chip!!</em> — that is the version gate refusing; do not force anything.</li>
+<li>The device drops off mid-write. Do not retry blindly: no recovery path is demonstrated and no read command exists to inspect the device state.</li>
+</ul>
+<h3>Still inference, not capture</h3>
+<ul>
+<li>Write span: the loop bound comes from the same flow that writes the bundled image, so the 1 MiB buffer's <code>0xFF</code> tail should never be written — reasoned, not traced to the loop counter.</li>
+<li>Recovery from an interrupted write: bootloader lives outside <code>0x7E000</code>, entry unproven.</li>
+<li>The <code>.hex</code> branch <code>(type 1)</code> is untested for this image; neither artifact needs it.</li>
+</ul>
+</section>
+<section id="status">
+<h2>Status</h2>
+<p>As of 2026-10-24:</p>
+<ul>
+<li><strong>Done:</strong> scaffold docs (<code>AGENTS.html</code>, <code>SPEC.html</code> scaffold, <code>HANDOFF.md</code>, feature map with <a href="features/binary-evidence.html">Binary evidence</a>); census-pass analysis via stdin probes (the facts in <a href="#starting-point">Where the analysis starts</a>).</li>
+<li><strong>Phase 1 done (2026-10-22):</strong> <code>analysis/probe_pe.py</code> written and re-run clean; artifacts persisted in <code>analysis/out/</code> (<code>census.txt</code> summarizes); census facts live in <a href="features/binary-evidence.html">Binary evidence</a>, no longer session memory.</li>
+<li><strong>Phase 2 core done:</strong> <code>analysis/decode_fw.py</code> validated the vector table, regions, Thumb/CM3, product string <code>MINI60HE MAX</code> in-image; page <a href="features/fw-image.html">Firmware image</a> exists. Open: checksum/version fields (marked hypothesis on the page) — phase 3 verifies from <code>ISP_Command</code>.</li>
+<li><strong>Phase 3 largely done (2026-10-22):</strong> <a href="features/isp-protocol.html">ISP protocol</a> page lives: transport wrappers, command table, want-gates, pw frames (verified: short frame 8B <code>02 AA 55 00</code> + payload at <code>*(flowCtl+0x1c)</code>; echo gate returns 5-on-match/4-on-mismatch vs global <code>0x5b1d6c</code>, initial poison value <code>0xFAFAFAFA</code>, writer register-indirect), chip-name registry with 5 protocol variants, EVT/I2C closed (absent), Settings-zip side effect (RCDATA 4011 → <code>%sSettingFiles</code>). Checksum formulas verified tool-side (byte-sum 0x40A7D0; big-endian-16 word-sum 0x40A800) and the version gate mechanics (record+9 word-index dword at <code>fwbuf+idx*2</code> vs device 4 bytes) — nothing embedded in the image; see <a href="features/fw-image.html">Firmware image</a>.</li>
+<li><strong>Remaining open (narrowed):</strong> which conversion of RCDATA 4007 <code>'12345678'</code> yields the 4-byte wire payload (ascii-'1234' / utf16-'12' / dec / hex — the device must echo the same value, so a live capture decides it); the runtime writer of <code>0x5b1d6c</code> (register-indirect, in the MFC object init); device-side bootloader constants (not in this user image by design).</li>
+<li><strong>Phase 2 remainder done (2026-10-22):</strong> keymap/lighting recon inside the image landed — <code>analysis/fw_feat.py</code> + <a href="features/fw-tables.html">Keymap &amp; LED tables</a> page: 61-key universe (0x01–0x3D, bijection-verified), three layout/grouping tables (walk / scan-group / 14 LED groups), LED-engine tables (ramps, palette, driver-init records targeting 0x4001B2xx, per-profile hues), HID item bytecode at the band tail. Open there: physical-grid placement, the id→HID-usage converter, scan loop &amp; debounce (phase 4 code walk).</li>
+<li><strong>Phase 4 core done (2026-10-22):</strong> <a href="features/key-pipeline.html">Key pipeline &amp; remap surface</a> page + <code>analysis/fw_keys.py</code>: the id→HID-usage table at 0x16DD8 (120 entries, sentinel id 0x7D, count u16 at 0x16EC8, reverse lookup 0x327C), the <strong>four 51-row layer tables</strong> (0x16C3E/0x16CA6/0x16D0C/0x16D72, stride 0x66, searched by 0x7378, byte1 is the output, layer 0 = Fn map), actuation constants (0x960/0x640/0xC), and the change filter at 0x5498 (hold 0x1388, min delta 0xA, per-id u16 arrays at 0x20003A16/0x20003B16). None of these tables is written by the image — remaps are table bytes, not code. Open: the scan row-index writer (0x20000326, reached through a computed base), layers 1–3 byte-0 semantics.</li>
+<li><strong>Phase 4 sensor front end done (2026-10-22):</strong> <code>analysis/fw_sensor.py</code> (report <code>analysis/out/fw_sensor.txt</code>) closed the sampler question. The scan runs in the <code>0x0FC8</code> IRQ: sixteen channel results at <code>0x40027000+0x00…+0x3C</code> (status/start <code>+0x10C</code>) are copied in a fixed non-linear channel order into the raw matrix <code>0x2000221E</code> (8 channels × 16 drive lines, row stride 0x20); <code>0x56E4</code> computes <code>id = row + 8*col</code>, maps the position through the 128-byte table at <code>0x16A96</code> (0x7D = empty, exactly 61 populated positions), clamps <code>raw &lt; 0x3E8</code> to 1000, runs the per-key adaptive filter <code>0x73A8</code> on 24-byte records at <code>0x20001330</code>, and tail-calls <code>0x32AC</code>. The physical grid is therefore known: channel 1–5 are keyboard rows, drive lines 0–13 carry keys, and every populated position resolves in the usage table. <code>0x32AC</code> writes the sample into <code>0x2000376E</code>, seeds <code>0x2000366E</code>, and keeps the running maximum in <code>0x200030AE</code>.</li>
+<li><strong>Phase 5 doc sweep done (2026-10-22):</strong> <code>docs/SPEC.html</code> gained the verified behavior sections (identity, typing/layers, actuation + debounce, lighting) and a settings table for the four companion-app values the loader seeds from the exe; the signer facts are now regenerable (<code>analysis/probe_cert.py</code> → <code>out/cert_info.txt</code>), which corrected the thumbprint and the timestamp date that this page had carried unverified; the stale "identity rests on the file name" trap on <a href="features/binary-evidence.html">Binary evidence</a> was retired because the firmware string closes it.</li>
+<li><strong>Risk &amp; wireless check recorded (2026-10-24):</strong> today's risk is zero — nothing has ever enumerated or opened the device. For phase 6 the risk is bounded to the write step: version, checksum and per-variant size guards sit in front, but the updater has <em>no flash-read command</em>, so no device dump is possible and an interrupted write is the main brick scenario (the bootloader sits outside the 0x7E000 app span, but recovery is unverified). <a href="features/fw-image.html">Firmware image</a> now carries the negative radio evidence (<code>analysis/probe_radio.py</code> → <code>out/probe_radio.txt</code>): no wireless vocabulary, no serial bus controller, one HID interface — a 2.4G/BT feature would be a separate RF SoC with its own firmware and updater.</li>
+<li><strong>OS-mode layer semantics closed (2026-10-24):</strong> the four 51-row tables are per-OS Fn overlays, not a base map plus three copies. Mode byte <code>0x200000AE</code> selects them; its writers decode the overlay's own extended codes (row 44 A→0x9C, 45 S→0xAB, 46 D→0xAC) and store 0 on Fn+S, 1 on Fn+D, 3 on Fn+A — so layer 0 = Windows, 1 = Mac, 3 = Android, and layer 2 (a third copy of the Mac output column) has no selector. Layers 1–3 share every output byte and differ from layer 0 only in the F1–F12 + Fn rows. Chain verified live (<code>0x1456E</code> → dispatcher <code>0x2FF0</code>, <code>0x1457A</code> → mode setter <code>0x2AE4</code>); <code>analysis/fw_keys.py</code> now asserts it and <a href="features/key-pipeline.html">Key pipeline</a> + <a href="SPEC.html">SPEC</a> carry it.</li>
+<li><strong>Phase 5 modification surface done (2026-10-24):</strong> <code>analysis/fw_patch.py</code> → <code>analysis/out/fw_patch.txt</code> reduces every candidate mod to an offset, a unit and its owning code, and the new page <a href="features/mod-surface.html">Modification surface</a> carries it. Byte-exact targets: the usage table <code>0x16DD8</code>, the four per-OS Fn overlays, the scan grid <code>0x16A96</code>, the actuation defaults (<code>0x8400</code>/<code>0x8500</code>, 112 × u16 each, uniform), the <code>0x9600</code> catalog (102 kind-2 + 10 kind-3 records), the LED palette/hue ramp/preset runs, and four code constants (hysteresis <code>0xC</code>, commit delta <code>0xA</code>, hold timer <code>0x1388</code>). Two corrections to earlier notes: <code>0x33D0/0x33D8/0x33E0</code> are initialization (two seeds plus a table base), not threshold compares; the size gate is a record-field test (<code>0x4272BD</code>) that in-place patching cannot change. <code>analysis/isp_gate.py</code> → <code>out/isp_gate.txt</code> pins the 12 chip records.</li>
+<li><strong>Next action:</strong> the priority is <strong>key remap</strong>. <code>analysis/fw_remap.py</code> (<code>out/fw_remap.txt</code>) is ready: put the wanted pairs in its <code>REQUESTS</code> list and it resolves, validates and prints the byte edits (worked example: CapsLock → Esc is one byte at <code>0x16E3B</code>, <code>0x39</code> → <code>0x29</code>). Before an image can be built, close the last gate - which image dword the version compare reads for this chip - then keep everything below <code>0x16A96</code> byte-identical. Anything needing a live device (pw-payload encoding, scan row-index writer, whether the companion app rewrites the keymap) stays parked. Phase 6 stays closed until an explicit user go, a second unit is available for the first (unmodified-image) flash, and a recovery path has been demonstrated.</li>
+<li><strong>Target locked (2026-10-24):</strong> the Fn output column is a vendor enum (<code>0x16BF6</code>, indexed <code>0xB0 + k</code>). Five on-keyboard tests fixed it: <code>Fn+1</code> = F1, <code>Fn+W</code> = BT host 2, <code>Fn+F7/F8/F9/F10</code> = prev / play-pause / next / mute. <code>0xB9</code> = Volume Up, <code>0xBA</code> = Volume Down — and rows 11/12 already map <code>F11/F12</code> to them, so <code>Fn+F12</code> is a zero-flash proof of the whole chain. The user's chord is four bytes — the Fn-map row plus the two usage-table bytes that make the image independent of the app's remap; see <a href="#first-patch">The first patch</a>.</li>
+<li><strong>Hardware symptom on file (2026-10-24):</strong> in wireless mode a key runs its configured macro only after a dead window of a few seconds on wake; wired replug and wire-mode switching are immediate. Wired boot is sub-second, so the window sits after the MCU, not in this image — but the Fn enum contains BT host switching (<code>0xA0–0xA3</code>), so a host↔radio command channel exists even though no radio peripheral appears in the image. Parked until the patch is decided.</li>
+<li><strong>Flash go recorded (2026-10-24):</strong> the user chose the second-unit path, so the write is planned, not done. Artifacts are staged as <code>analysis/out/fw_stock.bin</code> (factory, <code>06a1a474…</code>) and <code>analysis/out/fw_volplus.bin</code> (bake, <code>ac46b5aa…</code>); the tool's <code>.bin</code> branch was verified to feed the same firmware pointer the bundled loader uses. Steps, abort conditions and the remaining inferences are in <a href="#flash-runbook">Flash runbook</a>. Nothing has been written to any device.</li>
+<li><strong>Deferred by user decision:</strong> <code>git init</code> — commit rules dormant until then; the scaffold is the first commit when it happens.</li>
+</ul>
+</section>
+<section id="related">
+<h2>Related</h2>
+<ul>
+<li><code>AGENTS.md</code> — process and hard rules (immutability of <code>bin/</code>, evidence discipline).</li>
+<li><code>docs/SPEC.md</code> — user-visible behavior spec (verified behavior rows, sourced from the firmware image; nothing observed on hardware yet).</li>
+<li><code>docs/features/index.html</code> — the map index; <code>docs/features/binary-evidence.html</code> holds the binary pin.</li>
+<li><code>HANDOFF.md</code> — the volatile session-state snapshot.</li>
+</ul>
+</section>
+</main>
+<footer class="doc-footer">
+<p><code>PLAN.md</code> is a pointer; this HTML page is the source of truth. Edit it directly and re-run <code>html-docs.mjs verify</code>.</p>
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,25 @@
+Third-party binaries
+====================
+
+bin/MINI 60 HE MAX_V1.52.exe is a vendor artifact: the SONiX USB MCU ISP tool,
+rebranded by FINDER (Dongguan) Technology Co., Ltd., EV-signed and published for
+updating Mini60HE Max keyboards. It is NOT covered by the MIT license in
+LICENSE. Copyright and all rights remain with its authors, and its presence here
+implies no affiliation with or endorsement by them.
+
+It is kept in the repository only because the analysis scripts need the exact
+file: they verify its SHA-256 pin (958A3995...3512D6) and extract the firmware
+image they study from it. If you clone this repository and do not want the
+binary, delete bin/ - nothing under docs/ depends on it, and the scripts that do
+will stop at their SHA-256 check with a clear message.
+
+Everything else in this repository - the analysis scripts, the documentation and
+the findings written in them - is MIT licensed, see LICENSE.
+
+Firmware and the keyboard
+=========================
+
+The firmware image examined here is read out of that installer and is not
+redistributed (analysis/out/ is generated locally and git-ignored). Writing a
+modified image to a device is the device owner's decision; the repository ships
+no flashing automation and never contacts hardware.

@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mini60HE Max Firmware Reverse Engineering — behavior spec</title>
+<meta name="generator" content="html-as-doc">
+<meta name="doc-source" content="docs/SPEC.md">
+<style>
+:root{color-scheme:light dark;--fg:#1d2433;--muted:#5b6475;--bg:#fff;--panel:#f7f9fc;--line:#d8dee9;--accent:#0b6e99;--code:#f4f6fa;--warn:#8a5a00}
+@media (prefers-color-scheme:dark){:root{--fg:#e6eaf2;--muted:#9aa4b8;--bg:#11151c;--panel:#161c25;--line:#2b3342;--accent:#6cc4e8;--code:#1a202a;--warn:#e0b25c}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:54rem;padding:2.5rem 1.25rem 5rem;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+main{display:block}
+h1,h2,h3,h4{line-height:1.25;margin:2.2rem 0 .8rem;scroll-margin-top:1rem}
+section{scroll-margin-top:1rem}
+h1{font-size:1.95rem;border-bottom:2px solid var(--line);padding-bottom:.45rem;margin-top:0}
+h2{font-size:1.4rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+h3{font-size:1.12rem}
+h4{font-size:1rem;color:var(--muted)}
+p,ul,ol,table,pre,blockquote{margin:.8rem 0}
+a{color:var(--accent);text-decoration-thickness:.06em;text-underline-offset:.15em}
+a:hover{text-decoration-style:dotted}
+code{background:var(--code);padding:.12em .34em;border-radius:.25rem;font:0.9em/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:.45rem;padding:.85rem 1rem;overflow:auto}
+pre code{background:none;padding:0;font-size:.875rem;line-height:1.55}
+pre.code[data-lang]::before{content:attr(data-lang);position:absolute;top:0;right:0;padding:.15rem .5rem;border-left:1px solid var(--line);border-bottom:1px solid var(--line);border-radius:0 .45rem 0 .45rem;background:var(--panel);color:var(--muted);font:600 .68rem/1.4 ui-monospace,monospace;text-transform:lowercase;letter-spacing:.03em}
+pre.verbatim{border-left:4px solid var(--warn)}
+pre.verbatim::before{content:"verbatim — " attr(data-why);display:block;color:var(--warn);font:600 .76rem/1.4 ui-monospace,monospace;margin-bottom:.5rem;white-space:pre-wrap}
+pre.mermaid{background:var(--bg);border:1px dashed var(--line)}
+table{border-collapse:collapse;width:100%;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:.45rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}
+blockquote{margin-left:0;padding:.1rem 0 .1rem 1rem;border-left:3px solid var(--line);color:var(--muted)}
+blockquote>:first-child{margin-top:0}
+blockquote>:last-child{margin-bottom:0}
+hr{border:0;border-top:1px solid var(--line);margin:2.4rem 0}
+ul,ol{padding-left:1.6rem}
+li{margin:.25rem 0}
+li>ul,li>ol{margin:.25rem 0}
+li.task{list-style:none;margin-left:-1.35rem}
+li.task input{margin-right:.5rem}
+img{max-width:100%;height:auto}
+.doc-header{color:var(--muted);font-size:.82rem;margin-bottom:2rem;display:flex;flex-wrap:wrap;gap:.4rem .75rem;align-items:baseline}
+.doc-header .doc-kicker{margin:0}
+.doc-header code{font-size:.95em}
+.doc-footer{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.8rem}
+.doc-footer p{margin:.25rem 0}
+.skip-link{position:absolute;left:-999px}
+.skip-link:focus{left:1rem;top:1rem;background:var(--panel);padding:.5rem;border-radius:.3rem;z-index:9}
+@media print{:root{--bg:#fff;--fg:#000}body{max-width:none;padding:0}.doc-header,.doc-footer{color:#444}pre,table,blockquote{break-inside:avoid}}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="doc-header">
+<p class="doc-kicker">Rendered from <code>docs/SPEC.md</code></p>
+</header>
+<main id="content">
+<h1 id="mini60he-max-firmware-reverse-engineering-behavior-spec">Mini60HE Max Firmware Reverse Engineering — behavior spec</h1>
+<p>User-visible behavior only: what the product does and what a user sees,
+readable without knowing the code. Behavior belongs here even when the code is
+where the reason for it lives — the reason, the mechanism and the traps live in
+<code>docs/features/</code>, and process and hard rules live in <code>AGENTS.md</code>.</p>
+<p>Each section below covers one user-visible area, in the order a user meets it.</p>
+<section id="scope">
+<h2>Scope</h2>
+<p>What this product is: the Mini60 HE Max keyboard&#39;s Windows companion software
+(<code>bin/MINI 60 HE MAX_V1.52.exe</code>, 2,386,384 bytes, PE version 2.1.2.13,
+SHA-256 <code>958A39951D2F908A7FE925E0FA598C321924CB235239BF37484AE7C8213512D6</code>),
+as observed by reverse engineering. &quot;User&quot; here means whoever runs this
+software on their keyboard; sections appear as RE pins them.</p>
+<p>What this project deliberately does not do: it does not reimplement the app,
+does not rehost the binary&#39;s code as source, and it never guesses — a section
+exists here only once something was observed and verified.</p>
+</section>
+<section id="identity">
+<h2>Identity</h2>
+<p>Everything below is read out of the pinned binary and the firmware image it carries; none of it has been observed on hardware yet, so these are the firmware&#39;s claims about itself, not bench measurements.</p>
+<ul>
+<li>The keyboard is driven as a HID keyboard, and the updater identifies its board by vendor <code>0x0C45</code> / product <code>0x80A1</code>. The firmware carries the product string <code>MINI60HE MAX</code>.</li>
+<li>The controller is a SONiX SN34F280 on the <code>108A</code> board. The updater also knows other SN8F/SN32F boards, which is why its chip list names parts this keyboard does not use.</li>
+</ul>
+</section>
+<section id="typing">
+<h2>Typing</h2>
+<ul>
+<li>61 physical keys are scanned continuously. Each key resolves to one logical key id, and each id resolves to one HID keyboard usage.</li>
+<li>Fn behaviour depends on an OS mode selected with Fn+S (Windows), Fn+D (Mac) or Fn+A (Android), stored as a mode byte and applied to the Fn overlay. The Windows overlay is the full Fn map: number row → F1–F10, <code>-</code>/<code>=</code> → F11/F12, K/L/U/I/O → Home/End/PrintScreen/ScrollLock/Pause, Delete → Insert, <code>;</code>/<code>&#39;</code> → PgUp/PgDn, <code>/</code> → Insert. The Mac and Android overlays pass F1–F12 and Fn through unchanged and otherwise match it; the fourth table copy has no selector and is unreachable. Without Fn, every mode types what is printed on the key.</li>
+<li>Most keys produce a standard keyboard usage. A set of extended action codes (media, lock keys and similar) is consumed by the report builder instead of becoming a usage, so those keys cannot be described as plain usages.</li>
+</ul>
+</section>
+<section id="actuation">
+<h2>Actuation and debounce</h2>
+<ul>
+<li>Each key has a press threshold of <code>2400</code> and a release threshold of <code>1600</code> in raw 16-bit sensor units, with a <code>12</code>-unit hysteresis band: a key must travel back up past the release threshold before it is allowed to release.</li>
+<li>State changes are filtered. A raw jump of <code>10</code> units or more commits immediately; smaller movement waits out a 5000-cycle stability countdown. That filter is the anti-chatter/debounce path and the place a performance change would land.</li>
+<li>The cycle count is not yet tied to a wall-clock time base, so 5000 is a number of filter calls, not a verified number of milliseconds.</li>
+</ul>
+</section>
+<section id="lighting">
+<h2>Lighting</h2>
+<ul>
+<li>Keys are grouped into 14 lighting groups (ids <code>0x00</code>–<code>0x0D</code>) that cover 58 of the 61 key ids; a group lights its members together.</li>
+<li>The engine ships waveform lookup tables (breathing and sine-shaped ramps that mirror back down), a primary palette (<code>ff0000</code>, <code>ff8000</code>, <code>ffff00</code>), per-profile hue values, and effect-speed presets of 200/150/100/75.</li>
+<li>The LED driver is initialised by register writes to a peripheral block at <code>0x4001B2xx</code>. All of this is table data in the image, not code, so a lighting change is a table edit.</li>
+</ul>
+</section>
+<section id="settings">
+<h2>Settings</h2>
+<p>These are the values the companion app holds for the connected board; the
+app seeds them from data inside its own executable, which is why they are
+describable without ever running it.</p>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Default</th>
+<th>Range</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ISP password</td>
+<td><code>12345678</code></td>
+<td>8 characters</td>
+<td>The updater&#39;s password field; the app loads this string at start-up and sends it to the device before flashing.</td>
+</tr>
+<tr>
+<td>Target VID</td>
+<td><code>0C45</code></td>
+<td>4 hex digits</td>
+<td>The updater&#39;s device-identification fields, used to find the board.</td>
+</tr>
+<tr>
+<td>Target PID</td>
+<td><code>80A1</code></td>
+<td>4 hex digits</td>
+<td>The updater&#39;s device-identification fields, used to find the board.</td>
+</tr>
+<tr>
+<td>Expected firmware file</td>
+<td><code>108ASN34F280_User.hex</code></td>
+<td>file name</td>
+<td>Shipped with the target definition for the 108A board.</td>
+</tr>
+</tbody>
+</table>
+<p>Key mapping, actuation and lighting are deliberately absent: those values
+exist only in the firmware image, with no decoded companion-app control, so
+they appear as observed behavior above and as tables in the feature pages.</p>
+</section>
+<section id="updating">
+<h2>Updating the keyboard</h2>
+<ul>
+<li>The updater talks to the keyboard over HID feature reports only — no mass-storage or serial path.</li>
+<li>Before writing, it compares the version word in the firmware file with the version bytes the device reports and refuses to continue on a mismatch (<code>Firmware Version is not for this chip!!</code>).</li>
+<li>It displays a 16-bit checksum of the loaded file; the hex-file and bin-file paths have separate checksum displays, and the firmware image carries no checksum field of its own.</li>
+<li>It has no command that reads back flash contents. It can program, erase and verify, but it cannot dump a stock image, so a backup has to be the factory image extracted from the updater itself — and the updater cannot prove the keyboard matches that copy.</li>
+<li>Flashing is gated in this project (phase 6, user-approved only): nothing described here has been written to a device.</li>
+</ul>
+</section>
+<section id="related">
+<h2>Related</h2>
+<ul>
+<li><a href="features/key-pipeline.html">Key pipeline &amp; remap surface</a> — the tables and code behind typing, actuation and debounce.</li>
+<li><a href="features/fw-tables.html">Keymap &amp; LED tables</a> — lighting groups, palettes and effect presets.</li>
+<li><a href="features/isp-protocol.html">ISP protocol</a> — the update conversation behind the password and version gate.</li>
+<li><a href="features/fw-image.html">Firmware image</a> — the image, its flash regions and the product string.</li>
+<li><a href="features/binary-evidence.html">Binary evidence</a> — the hash pin and the signer.</li>
+</ul>
+</section>
+</main>
+<footer class="doc-footer">
+<p>Generated by <code>html-as-doc</code> from <code>docs/SPEC.md</code>.</p>
+<p>The Markdown file is a pointer; this HTML page is the source of truth. Edit it directly and re-run <code>html-docs.mjs verify</code>.</p>
+</footer>
+
+</body>
+</html>

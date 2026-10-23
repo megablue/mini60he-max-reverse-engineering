@@ -1,0 +1,19 @@
+# Generated analysis artifacts - regenerate with the scripts that made them.
+# Everything here is derived from bin/ and pinned by SHA-256, so it is not tracked.
+analysis/out/
+analysis/__pycache__/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini
+.DS_Store

@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AGENTS.md</title>
+<meta name="generator" content="html-as-doc">
+<meta name="doc-source" content="AGENTS.md">
+<style>
+:root{color-scheme:light dark;--fg:#1d2433;--muted:#5b6475;--bg:#fff;--panel:#f7f9fc;--line:#d8dee9;--accent:#0b6e99;--code:#f4f6fa;--warn:#8a5a00}
+@media (prefers-color-scheme:dark){:root{--fg:#e6eaf2;--muted:#9aa4b8;--bg:#11151c;--panel:#161c25;--line:#2b3342;--accent:#6cc4e8;--code:#1a202a;--warn:#e0b25c}}
+*{box-sizing:border-box}
+body{margin:0 auto;max-width:54rem;padding:2.5rem 1.25rem 5rem;background:var(--bg);color:var(--fg);font:16px/1.65 system-ui,-apple-system,"Segoe UI",sans-serif;-webkit-text-size-adjust:100%}
+main{display:block}
+h1,h2,h3,h4{line-height:1.25;margin:2.2rem 0 .8rem;scroll-margin-top:1rem}
+section{scroll-margin-top:1rem}
+h1{font-size:1.95rem;border-bottom:2px solid var(--line);padding-bottom:.45rem;margin-top:0}
+h2{font-size:1.4rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+h3{font-size:1.12rem}
+h4{font-size:1rem;color:var(--muted)}
+p,ul,ol,table,pre,blockquote{margin:.8rem 0}
+a{color:var(--accent);text-decoration-thickness:.06em;text-underline-offset:.15em}
+a:hover{text-decoration-style:dotted}
+code{background:var(--code);padding:.12em .34em;border-radius:.25rem;font:0.9em/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+pre{position:relative;background:var(--code);border:1px solid var(--line);border-radius:.45rem;padding:.85rem 1rem;overflow:auto}
+pre code{background:none;padding:0;font-size:.875rem;line-height:1.55}
+pre.code[data-lang]::before{content:attr(data-lang);position:absolute;top:0;right:0;padding:.15rem .5rem;border-left:1px solid var(--line);border-bottom:1px solid var(--line);border-radius:0 .45rem 0 .45rem;background:var(--panel);color:var(--muted);font:600 .68rem/1.4 ui-monospace,monospace;text-transform:lowercase;letter-spacing:.03em}
+pre.verbatim{border-left:4px solid var(--warn)}
+pre.verbatim::before{content:"verbatim — " attr(data-why);display:block;color:var(--warn);font:600 .76rem/1.4 ui-monospace,monospace;margin-bottom:.5rem;white-space:pre-wrap}
+pre.mermaid{background:var(--bg);border:1px dashed var(--line)}
+table{border-collapse:collapse;width:100%;display:block;overflow:auto}
+th,td{border:1px solid var(--line);padding:.45rem .7rem;text-align:left;vertical-align:top}
+th{background:var(--code);font-weight:600}
+blockquote{margin-left:0;padding:.1rem 0 .1rem 1rem;border-left:3px solid var(--line);color:var(--muted)}
+blockquote>:first-child{margin-top:0}
+blockquote>:last-child{margin-bottom:0}
+hr{border:0;border-top:1px solid var(--line);margin:2.4rem 0}
+ul,ol{padding-left:1.6rem}
+li{margin:.25rem 0}
+li>ul,li>ol{margin:.25rem 0}
+li.task{list-style:none;margin-left:-1.35rem}
+li.task input{margin-right:.5rem}
+img{max-width:100%;height:auto}
+.doc-header{color:var(--muted);font-size:.82rem;margin-bottom:2rem;display:flex;flex-wrap:wrap;gap:.4rem .75rem;align-items:baseline}
+.doc-header .doc-kicker{margin:0}
+.doc-header code{font-size:.95em}
+.doc-footer{margin-top:3.5rem;padding-top:1rem;border-top:1px solid var(--line);color:var(--muted);font-size:.8rem}
+.doc-footer p{margin:.25rem 0}
+.skip-link{position:absolute;left:-999px}
+.skip-link:focus{left:1rem;top:1rem;background:var(--panel);padding:.5rem;border-radius:.3rem;z-index:9}
+@media print{:root{--bg:#fff;--fg:#000}body{max-width:none;padding:0}.doc-header,.doc-footer{color:#444}pre,table,blockquote{break-inside:avoid}}
+</style>
+</head>
+<body>
+<a class="skip-link" href="#content">Skip to content</a>
+<header class="doc-header">
+<p class="doc-kicker">Rendered from <code>AGENTS.md</code></p>
+</header>
+<main id="content">
+<h1 id="agents-md">AGENTS.md</h1>
+<p><strong>Before you grep, glob or open a source file: read <code>HANDOFF.md</code>, then <code>docs/features/index.html</code>, then only the feature page(s) for the area you are about to change. The feature pages name the files, functions and tests you would otherwise hunt for — the code comes after them, not before.</strong></p>
+<p>Mini60HE Max Firmware Reverse Engineering is a reverse-engineering workspace for the Mini60 HE Max keyboard&#39;s Windows companion software: one stock binary is held as immutable evidence, and every deliverable is recovered knowledge — what the app does, what its settings control, and how it drives the keyboard.</p>
+<p>Three kinds of document, and keeping them apart is the point:</p>
+<ul>
+<li><strong><code>docs/SPEC.md</code> is product behavior</strong> — what the product does and what a
+user sees, readable without knowing the code. Behavior belongs there even
+when the code is where the reason for it lives.
+</li>
+<li><strong><code>docs/features/</code> is the feature map</strong> — one page per feature with its
+files, mechanisms, traps and pinning tests. Read the page for the area you
+are about to change; keep it true in the same commit.
+</li>
+<li><strong>This file is process and hard rules</strong> — the commands, the workflow and
+the constraints that apply across every feature.
+</li>
+</ul>
+<p>Where a rule has a behavior half and a mechanism half, the behavior half is a
+pointer to <code>docs/SPEC.md</code> and the mechanism half to its feature page rather
+than a second copy: two copies of a default value is one more thing that can
+be wrong.</p>
+<p>AGENTS.md and docs/SPEC.md are HTML documents (<code>AGENTS.html</code>,
+<code>docs/SPEC.html</code>); the .md files beside them are pointer stubs that only keep
+the paths alive, so edit the .html directly.</p>
+<section id="read-first">
+<h2>Read first</h2>
+<p><code>HANDOFF.md</code> holds the current state; if it is missing, carry on with the
+feature map and the code. Then <code>docs/features/index.html</code> — the feature map —
+and only the feature doc(s) for what you are about to change.
+<code>docs/SPEC.md</code> is user-visible behavior; this file is process and hard rules;
+the feature docs are the map, the mechanism and the traps.</p>
+</section>
+<section id="layout">
+<h2>Layout</h2>
+<ul>
+<li><code>bin/</code> — stock evidence. The vendor binary (<code>MINI 60 HE MAX_V1.52.exe</code>,
+SHA-256 pinned below), copied in verbatim. Why it is separate: everything
+else in this workspace is derived work; this directory is the ground truth
+every claim is checked against, so it is never edited, only re-hashed.
+</li>
+<li><code>docs/</code> — <code>SPEC.md</code> (behavior) + <code>features/</code> (the map). Created by this
+scaffold; pages are added as RE areas emerge.
+</li>
+<li><code>analysis/</code> — static-probe tooling and its reproducible artifacts.
+<code>probe_pe.py</code> parses the pinned exe as data (hash, metadata, imports,
+resource tree, strings) and never runs it; <code>probe_cert.py</code> walks the
+Authenticode overlay with a minimal DER reader into certificates, signer chain
+and RFC 3161 timestamp. <code>out/</code> is what they wrote, with
+<code>census.txt</code> as the summary. Re-running the script regenerates <code>out/</code>.
+The firmware probes work the same way on the extracted image: <code>fw_code.py</code>
+(recursive-descent map), <code>fw_keys.py</code> (key/layer tables),
+<code>fw_feat.py</code> (layout/LED band), <code>fw_sensor.py</code> (scan front
+end, with asserts), <code>probe_radio.py</code> (negative evidence for a radio
+or companion chip) and <code>fw_fn.py</code>/<code>fw_find.py</code> (annotated
+disassembly lookups). Phase 5 added two more: <code>fw_patch.py</code> (the
+modification surface — every patch target byte-exact, <code>out/fw_patch.txt</code>)
+and <code>isp_gate.py</code> (chip-record table and the RCDATA size gate,
+<code>out/isp_gate.txt</code>). <code>fw_remap.py</code> is the remap planner:
+it resolves a requested key mapping, validates it and prints the byte edits
+(<code>out/fw_remap.txt</code>), never writing an image.
+<code>fw_volpatch.py</code> is the one script that does build an image — the
+first patch (Fn + Right Arrow = Volume Up): it asserts every precondition,
+changes the two Fn-map bytes and writes <code>out/fw_volplus.bin</code> plus a
+diff/verify report (<code>out/fw_volpatch.txt</code>). It reads
+<code>analysis/out/rcdata_4000.bin</code> and never touches <code>bin/</code>.
+</li>
+<li>Analysis artifacts (disassemblies, unpacked payloads, scratch tooling,
+reports) get top-level directories when created, each with a bullet here in
+the commit that creates it. Do not scatter artifacts under a feature page.
+</li>
+</ul>
+</section>
+<section id="commands">
+<h2>Commands</h2>
+<p>Nothing is built, tested or linted yet — the workspace is evidence plus docs.
+The gate before a commit is evidentiary, not automated:</p>
+<pre class="code"><code>binary unchanged (SHA-256 matches the pin) → claims in this commit trace
+to an artifact or a command in the workspace → feature page updated in
+the same commit</code></pre>
+<p>When tooling exists, its gates get added here in the same commit as the tool.
+Useful today:</p>
+<pre class="code"><code># pin / verify the evidence binary (PowerShell, from the workspace root)
+(Get-FileHash -LiteralPath &#39;bin\MINI 60 HE MAX_V1.52.exe&#39; -Algorithm SHA256).Hash
+(Get-Item -LiteralPath &#39;bin\MINI 60 HE MAX_V1.52.exe&#39;).VersionInfo.FileVersion</code></pre>
+</section>
+<section id="workflow">
+<h2>Workflow</h2>
+<ul>
+<li><strong>The features map is part of the change, not the cleanup.</strong> Before staging a
+commit, update the feature doc(s) for whatever you changed
+(<code>docs/features/</code>), and add an index row if the doc is new. User-visible
+behavior also updates <code>docs/SPEC.md</code> in the same commit. A docs-only
+follow-up commit is the one that gets skipped. Pure refactors with no
+behavior, mechanism, config or test change need no doc edit — do not churn
+the map.
+</li>
+<li><strong>Read the map before the code, and keep the map worth reading.</strong> A feature
+page is an anti-hunting payload: the file, type, function and test names for
+one area, and the traps that cost someone an afternoon. Opening the source
+first and writing the page afterwards spends the tokens twice. If a page is
+wrong, fix it in the same commit rather than working around it — a map
+nobody trusts is worse than no map.
+</li>
+<li><strong>Search the map in the same breath as the code.</strong> A grep for a feature, a
+symbol or a behaviour runs over <code>docs/features/</code> too: the feature pages name
+the identifiers and the tests, so the page you need is usually one hop from
+the hit.
+</li>
+<li><strong><code>HANDOFF.md</code> is refreshed at the end of a session, not per commit.</strong> It
+carries what only the passing session knows — open threads, next steps, the
+last thing delivered — under an <code>As of</code> stamp. It is allowed to lag the tip:
+its header says the code wins. Refresh it before you hand the work over.
+</li>
+<li><strong>Measure, don&#39;t deduce it.</strong> Reading the code and doing the arithmetic in
+your head is how geometry, layout and formatting bugs ship. Print the real
+numbers from the real thing — a headless run, a scratch script, the actual
+command — and assert both the good and the broken case, so each test carries
+its own failure mode.
+</li>
+<li><strong>Gate on the whole check set, not just the tests.</strong> The linter catches the
+classes of defect the test run compiles straight past. Run the formatting,
+the lint with warnings denied, the tests and the build before you call
+something done.
+</li>
+<li><strong>Commit messages go through a file.</strong> Write the message to a scratch file
+(this machine uses <code>%LOCALAPPDATA%\Temp\opencode\&lt;project&gt;-commit-msg.txt</code>)
+and run <code>git commit -F &lt;path&gt;</code>; a PowerShell here-string gets its terminator
+mangled by the shell tool.
+</li>
+<li><strong>No AI attribution in a commit message, ever, without being asked.</strong> No
+<code>Co-Authored-By</code> trailer, no <code>Generated with</code> footer, nothing that reads as
+crediting a model or tool. These commits are the user&#39;s. This is enforced,
+not merely preferred: a machine-wide <code>commit-msg</code> hook
+(<code>core.hooksPath</code> pointing at the user&#39;s global hooks directory) rejects the commit outright,
+and it blocks human co-authors too, so the only ways past it are <code>--no-verify</code>
+or <code>ALLOW_COAUTHOR=1</code>. <strong>Use neither without the user asking in that
+conversation.</strong> If the hook blocks something, report it and stop; do not
+reword the message to slip a trailer past the pattern.
+</li>
+<li><strong>Package after committing.</strong> If the version is derived from the commit
+(a count since a base tag, a stamped build number), packaging first yields
+the previous commit&#39;s number. Raise the minor and the base together, in the
+same commit, and keep every reader of that number reading it from one place.
+</li>
+<li><strong>Do not commit before the user has looked at it.</strong> Hand a visual change over
+as a build and wait for confirmation.
+</li>
+</ul>
+</section>
+<section id="where-the-working-knowledge-lives">
+<h2>Where the working knowledge lives</h2>
+<p>The per-feature working knowledge lives in <code>docs/features/</code>; its <code>index.html</code> is
+the index. This file keeps the process rules and the hard rules that apply
+across features; the feature pages keep the maps, mechanisms and traps.</p>
+<p>Feature pages are HTML documents. A code-shaped block is pseudocode —
+<code>&lt;pre class=&quot;pseudo&quot;&gt;</code> — because an agent copies the shape, not the bytes;
+<code>&lt;pre class=&quot;verbatim&quot; data-why=&quot;…&quot;&gt;</code> is only for a block whose exact bytes
+matter, and the reason is mandatory. A graph is <code>&lt;pre class=&quot;mermaid&quot;&gt;</code>; the
+tool hands the agent an edge list and the browser draws the picture. A map
+written as Markdown is still read, and <code>feature_map_upgrade</code> converts one.</p>
+</section>
+<section id="hard-rules">
+<h2>Hard rules</h2>
+<ul>
+<li><strong><code>bin/</code> is immutable.</strong> Never edit, rename or re-encode anything in it. The
+pinned SHA-256 lives on the evidence feature page; re-hash before publishing
+any claim traced to the binary, so a swapped file cannot silently invalidate
+the documentation.
+</li>
+<li><strong>The file name lies about the version.</strong> <code>…V1.52.exe</code> reports PE version
+<code>2.1.2.13</code> internally, and its version strings are otherwise empty. Every
+reference to the binary cites the SHA-256 (prefix OK or full hash), never
+the file name alone.
+</li>
+<li><strong>Behavior claims carry evidence.</strong> <code>docs/SPEC.md</code> states only observed,
+reproducible behavior; speculation is welcome in <code>docs/features/</code> pages but
+must be tagged speculative there and must never reach the spec until
+verified.
+</li>
+<li><strong>No repo yet.</strong> Commit-rules above stay dormant until <code>git init</code>; when
+initialized, this scaffold is the first commit. Hand a visual change over
+as a build and wait for confirmation.
+</li>
+<li>The README is for users. Implementation detail belongs in <code>docs/SPEC.md</code> for
+behavior and here for working knowledge, and the user must be consulted
+before technical detail is added to the README.
+</li>
+</ul>
+</section>
+</main>
+<footer class="doc-footer">
+<p>Generated by <code>html-as-doc</code> from <code>AGENTS.md</code>.</p>
+<p>The Markdown file is a pointer; this HTML page is the source of truth. Edit it directly and re-run <code>html-docs.mjs verify</code>.</p>
+</footer>
+
+</body>
+</html>

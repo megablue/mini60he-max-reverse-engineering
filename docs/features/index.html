@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="opencode-feature-map">
+<title>Mini60HE Max Firmware Reverse Engineering — features map</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map index">
+<h1>Mini60HE Max Firmware Reverse Engineering — features map</h1>
+
+<p>Read this before touching code: find the area, then open only the one or two feature pages it points at.</p>
+
+<p>Read order: <code>HANDOFF.md</code> (current state) → <a href="../PLAN.html">docs/PLAN.html</a> (the six-phase plan) → this index → <strong>the page for your area</strong> → the code. <code>docs/SPEC.md</code> is user-visible behavior; <code>AGENTS.md</code> is process and hard rules; <code>docs/PLAN.html</code> is how the phases advance; the pages below are the map, the mechanism and the traps.</p>
+
+<p><strong>Keep this map true in the same commit as the change.</strong> Before staging a commit, update the feature page(s) for whatever you changed, and add a row here if the page is new. User-visible behavior also updates <code>docs/SPEC.md</code> in the same commit; a docs-only follow-up commit is the one that gets skipped. Pure refactors with no behavior, mechanism, config or test change need no edit.</p>
+
+<table>
+<thead><tr><th>Feature</th><th>Doc</th><th>Read when</th></tr></thead>
+<tbody>
+<tr><td>Binary evidence</td><td><a href="binary-evidence.html">binary-evidence.html</a></td><td>the stock binary, the SHA-256 pin, PE version 2.1.2.13, empty version strings, verifying a claim traced to the binary</td></tr>
+<tr><td>Firmware image (RCDATA 4000)</td><td><a href="fw-image.html">fw-image.html</a></td><td>the embedded SN34F280 image — vector table, flash regions, product strings, checksum hunt, wireless/companion-chip absence, planning a patch offset</td></tr>
+<tr><td>ISP protocol (HID output reports)</td><td><a href="isp-protocol.html">isp-protocol.html</a></td><td>the 8-byte frame format, the AA 55 command table, the 0x4039C0 upload flow, the expected-echo gate, the pw/erase-gate frames, reimplementing the updater</td></tr>
+<tr><td>Keymap &amp; LED tables (fw band)</td><td><a href="fw-tables.html">fw-tables.html</a></td><td>the 0x16E00–0x185E8 layout/LED band inside RCDATA 4000 — 61-key universe, layout grouping tables, ramps/palettes/driver-init — decoding a key id, planning key remapping or RGB mods</td></tr>
+<tr><td>Key pipeline &amp; remap surface</td><td><a href="key-pipeline.html">key-pipeline.html</a></td><td>how a scanned key becomes a HID usage — the 0x0FC8 scan IRQ and 0x40027000 channel block, the 0x16A96 position map, the 0x16DD8 usage table, the four 51-row per-OS Fn-overlay tables and the Fn+S/Fn+D/Fn+A Windows/Mac/Android mode byte, the id 0x7D sentinel, actuation thresholds and the 0x5498 change filter - changing what a key sends</td></tr>
+<tr><td>Modification surface</td><td><a href="mod-surface.html">mod-surface.html</a></td><td>choosing a mod and computing a patch offset — the three key-remap hooks (<code>0x16DD8</code> usage table, four Fn overlays, <code>0x16A96</code> scan grid), the Fn action enum (<code>0xB0 + k</code> → consumer usages, so <code>0xB9</code> is Volume Up), the dead Fn rows and the two-byte chord patch, actuation defaults and the hysteresis/debounce immediates, the LED palette/hue/preset runs, and the length/version/checksum/signature gates a patched image must survive</td></tr>
+</tbody>
+</table>
+<!-- One row per feature page. Keep "Read when" a trigger, not a restatement of
+the title: it is the line an agent searches for when it does not yet know which
+page it needs. The plugin fills this marked row from the pages when it
+scaffolds or adopts a project, and rewrites it only when asked. -->
+
+<p>The index is the entry point, not a glob: pages may live in subdirectories as well as at the top level, so <code>docs/features/*.html</code> alone misses them. Follow the row's link.</p>
+
+<h2>Page format</h2>
+
+<p>A feature page is an HTML document with an <code>h1</code> title, a <code>p class="status"</code> line and one <code>section</code> per heading. The headings are the retrieval unit: the tool returns one section at a time, so a section is what a later session reads on its own.</p>
+
+<pre class="verbatim" data-why="the headings and the status line are the retrieval contract; copy them byte for byte">&lt;h1&gt;&lt;Feature&gt; — &lt;one-line summary&gt;&lt;/h1&gt;
+&lt;p class="status"&gt;Status: shipped (vX.Y) · Read when: &lt;trigger&gt;&lt;/p&gt;
+
+&lt;section id="what-it-does"&gt;
+  &lt;h2&gt;What it does&lt;/h2&gt;
+  &lt;ul&gt;&lt;li&gt;3–6 bullets; link &lt;code&gt;docs/SPEC.md&lt;/code&gt; for the user-visible detail.&lt;/li&gt;&lt;/ul&gt;
+&lt;/section&gt;
+
+&lt;section id="map"&gt;
+  &lt;h2&gt;Map&lt;/h2&gt;
+  &lt;p&gt;Files, types, functions and test names — the anti-hunting payload. Names, never line numbers (they rot).&lt;/p&gt;
+&lt;/section&gt;
+
+&lt;section id="how-why"&gt;
+  &lt;h2&gt;How &amp; why&lt;/h2&gt;
+  &lt;p&gt;The mechanism, the invariants and the traps: cause and effect, not a retelling of the bug that produced the rule.&lt;/p&gt;
+&lt;/section&gt;
+
+&lt;section id="config-keys-ui"&gt;
+  &lt;h2&gt;Config keys / UI&lt;/h2&gt;
+  &lt;table&gt;…&lt;/table&gt;
+&lt;/section&gt;
+
+&lt;section id="tests-that-pin-it"&gt;
+  &lt;h2&gt;Tests that pin it&lt;/h2&gt;
+  &lt;p&gt;Test names — run these first when touching the area.&lt;/p&gt;
+&lt;/section&gt;
+
+&lt;section id="related"&gt;
+  &lt;h2&gt;Related&lt;/h2&gt;
+  &lt;ul&gt;&lt;li&gt;Links to the other feature pages.&lt;/li&gt;&lt;/ul&gt;
+&lt;/section&gt;</pre>
+
+<p>A code-shaped block is pseudocode and the default: <code>&lt;pre class="pseudo"&gt;</code>. Use <code>&lt;pre class="verbatim" data-why="…"&gt;</code> only when the exact bytes must survive, and say why — a verbatim block with no reason is how a copied block escapes review. A graph is <code>&lt;pre class="mermaid"&gt;</code>: the browser draws it and the tool hands an agent the edge list.</p>
+
+<pre class="pseudo">probe fails → backoff doubles → retry after ceiling → surface the error</pre>
+
+<p>Keep a page 60–200 lines and split past ~250, and keep a section under about two kilobytes: a section is what a later reader asks for by name, and one that outgrew a single read has to be split with <code>h3</code> before it can be handed over whole. No sentence lives in two docs: <code>docs/SPEC.md</code> is behavior, a feature page is map/mechanism/traps, <code>AGENTS.md</code> is process.</p>
+</article>
+</body>
+</html>

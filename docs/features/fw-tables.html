@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="opencode-feature-map">
+<title>Keymap &amp; LED tables — the 0x16E00–0x185E8 band of RCDATA 4000</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>Keymap &amp; LED tables — the 0x16E00–0x185E8 band of RCDATA 4000</h1>
+<p class="status">Status: recon verified (61-key universe + three layout/grouping tables + LED-engine tables classified by byte evidence); the id→usage table, layer tables, actuation constants and change filter are now documented on the phase-4 <a href="key-pipeline.html">key-pipeline</a> page · Read when: decoding a key id, planning key remapping or RGB mods, or touching <code>analysis/fw_feat.py</code></p>
+
+<section id="what-it-is">
+  <h2>What it is</h2>
+  <ul>
+    <li>The table band inside RCDATA 4000 (same image as the <a href="fw-image.html">Firmware image</a> page), classified by <code>analysis/fw_feat.py</code>; full report <code>analysis/out/fw_feat.txt</code>, regenerable with <code>python analysis/fw_feat.py</code>.</li>
+    <li>In this band <strong>0x5A ("Z") is the unused-slot filler byte</strong> and <code>0x00</code> acts as a delimiter/terminator — neither is an "empty flash" convention.</li>
+    <li>Band start 0x16E00 is the tail of the string/font/gradient zone; the region 0x18140–0x185E8 additionally carries real HID report-descriptor item bytecode (<code>19 e0 29 e7 75 01 95 08 81 …</code>, usage-min/max E0–E7 = modifier bitmap) interleaved with other data.</li>
+  </ul>
+</section>
+
+<section id="key-universe">
+  <h2>Key universe (fact)</h2>
+  <ul>
+    <li>Exactly <strong>61 key IDs 0x01–0x3D, contiguous, no gaps</strong> — consistent with a 60%-class ANSI board. Byte-verified: the walk array below enumerates all 61, and the union of all three layout tables is {01…3D} with zero missing values.</li>
+    <li>These are <strong>internal layout key IDs, not HID usage codes</strong>. The id → HID-usage conversion lives in the band at <code>0x16DD8</code> (120 entries, sentinel id 0x7D) — see <a href="key-pipeline.html">Key pipeline &amp; remap surface</a>, which also carries the scan/actuation/debounce findings.</li>
+  </ul>
+</section>
+
+<section id="layout-tables">
+  <h2>Layout tables (fact)</h2>
+  <pre class="pseudo">A walk array      0x1700F..0x1704B  61 ids, serpentine order, 0x00 delimiter at 0x1700E,
+                                    0x5a filler padding the remaining slots to 0x1704C
+B scan grouping   0x17058..0x170A5  Z-padded stream, groups split on >=2 consecutive 0x5a,
+                                    terminated by 0x00 at 0x170AC; 8 groups (6,10,8,9,10,5,1,10)
+                                    covering 59 of the 61 keys (2x missing: 22, 3d)
+C LED groups      0x175C1..0x1762B  group ids 00..0D in ascending order, each followed by
+                                    1..4 member key ids (all >= 0x0e, so id-walk is
+                                    unambiguous), 0x5a padding between/inside records;
+                                    14 groups, 58 of 61 keys covered
+W pair table      0x16FF6..0x1700D  12 raw pairs (key,partner), first partner is the
+                                    0x5a wildcard: (1c,5a)(1d,0e)(1e,0f)(1f,10)(20,11)(21,12)
+                                    (2f,09)(2e,08)(2d,07)(24,15)(23,14)(22,13)
+(cell records)    0x174B9..0x17598  16-byte-stride records of <=4 (a,b) pairs, 0-padded —
+                                    a second grouping view, semantics open</pre>
+  <ul>
+    <li>C groups read as a <strong>diagonal sweep</strong>: each crosses the walk blocks once (e.g. group 9 = 09 12 25 2b 39; group 13 = 0d 0e 28 — the right edge and then wrap).</li>
+    <li>B lines likewise pick ~one key per walk block (line 7 = 01 1b 1c 34 3c 3b 29 28 0e 0d shows symmetric edge pairs). The A-blocks are therefore <em>not</em> proven to be physical rows — treat block↔row as open.</li>
+  </ul>
+</section>
+
+<section id="led-engine">
+  <h2>LED-engine tables (fact)</h2>
+  <table>
+    <tr><th>Range</th><th>Content</th></tr>
+    <tr><td>0x16F80–0x16FAF</td><td>RGB triplets / per-channel color bases (88 8e e8, ee, ff, ff 50 00…)</td></tr>
+    <tr><td>0x170B9–0x17354</td><td>ramp/waveform LUTs up then mirrored back down (bright-breathing, sine shape, step-2/3/4)</td></tr>
+    <tr><td>0x17668–0x17678</td><td>RGB palette: ff0000 ff8000 ffff00 …</td></tr>
+    <tr><td>0x17830–0x178A0</td><td>hue-ramp byte-triplets (middle byte advances quadratically, mirrors back)</td></tr>
+    <tr><td>0x17A70–0x17AB8</td><td>effect presets: pairs like c8 96 64 4b (200/150/100/75) + ff boundaries</td></tr>
+    <tr><td>0x17CC0–0x17D40</td><td>register-init records: dwords targeting peripheral addresses 0x4001B2xx (LE)</td></tr>
+    <tr><td>0x17E38–0x17F00</td><td>per-profile hue values (0x77/0x6f/0x21/0x47…) with 01 1d-style headers</td></tr>
+    <tr><td>0x17F20–0x17FB0</td><td>LED-driver init records: (subaddr 0x14/0x18, channel-step)(value) tuples</td></tr>
+  </table>
+</section>
+
+<section id="traps">
+  <h2>Traps</h2>
+  <ul>
+    <li><strong>Do not index C at fixed stride</strong> — early records look 8-byte-aligned (<code>5a 00 1b 1c 34 35 5a 5a</code>) but member counts vary; parse by walking expected group ids 00..0D.</li>
+    <li><strong>Member bytes ≥ 0x0E always.</strong> That is what makes the id-walk parse unambiguous; if a future variant shows a small member byte, the parser needs a better discriminator.</li>
+    <li><strong>0x5A vs 0x00 have opposite roles</strong> (filler vs delimiter); stripping both blindly corrupts group boundaries — B's line split needs the ≥2-consecutive rule, A needs byte-0 as terminator.</li>
+    <li><strong>Key ids ≠ HID usages ≠ matrix coords.</strong> No conversion table was found in the band; assuming 0x02 lovercase etc. without the converter will produce wrong remaps.</li>
+    <li><strong>Physical-grid placement is open.</strong> The diagonal sweep pattern suggests LED-zone geometry, not key rows; pin the grid against code (phase 4) before claiming a physical key position for any id.</li>
+  </ul>
+</section>
+
+<section id="tests">
+  <h2>Tests that pin it</h2>
+  <pre class="pseudo">python analysis/fw_feat.py   # regenerates out/fw_feat.txt (static, read-only)
+# inside: image size + tail-magic asserts, key-universe check prints
+# "A walk: 61 distinct keys", "union 61 keys ... gaps in range: NONE"</pre>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="fw-image.html">Firmware image</a> — the vector table, region map and checksum story this band lives in.</li>
+    <li><a href="key-pipeline.html">Key pipeline &amp; remap surface</a> — the id→usage table at 0x16DD8, the four 51-row layer tables and the 0x5498 change filter (phase-4 code walk).</li>
+    <li><a href="isp-protocol.html">ISP protocol</a> — where a swapped keymap would have to survive the checksum/version gates at upload time.</li>
+    <li><a href="binary-evidence.html">Binary evidence</a> — the SHA pin and exe census.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

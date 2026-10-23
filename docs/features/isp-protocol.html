@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="opencode-feature-map">
+<title>ISP protocol — HID feature-report commands in the updater</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>ISP protocol — the updater's feature-report protocol over HID</h1>
+<p class="status">Status: command table + frame format + uploader + code-option + finish-floor verified from the pinned exe; 2026-10-22 corrections: the 0x2x-family rows are bare <code>cmd AA 55</code> (no 05 prefix), the pw short frame = 8B <code>02 AA 55 00</code> + payload at <code>*(flowCtl+0x1c)</code>, the pw echo gate returns 5-on-match/4-on-mismatch vs stored global 0x5b1d6c (initial 0xFAFAFAFA poison, writer register-indirect), SZK671F is one chip-name-registry member across 5 protocol variants, and the EVT/I2C open item is closed (absent from the exe). Still open: which conversion of RCDATA 4007 lands on the wire (4 candidate encodings) · Read when: interpreting anything in the ISP zone, planning a controller reimplementation, or touching the version/checksum story</p>
+<section id="what-it-is">
+  <h2>What it is</h2>
+  <ul>
+    <li>Foundry: the phase-1 strings guessed <em>feature</em> reports; the disassembly refutes both guesses. The protocol sends HID <strong>output reports</strong> through <code>HidD_SetOutputReport</code> (IAT slot <code>0x55B1F8</code>, always reached via <code>jmp [0x55B1F8]</code> at <code>0x429744</code>, whose only incoming <code>call</code> is <code>0x4287C2</code> inside the send wrapper <code>0x428680</code>) and reads echoes with <code>HidD_GetFeature</code> through read wrapper <code>0x428810</code>. No other HID transfer type is imported.</li>
+    <li>Rule of the exchanges: every frame is an <strong>8-byte output report</strong> (report-ID 0 prepended before buf). Almost every command ends in the sequence <code>{0xAA, 0x55, 0x00}</code> at buf[1..3]. No SetFeature-side command carries an 0xAA55 — that triad is the device→erase-flow side, from protocol slots referenced only by the bulk gateway at <code>0x5bcea8</code> (see io_sites window <code>0x4029FE</code> for one example). Evidence <code>out/io_sites.txt</code>, first window <code>0x4029FE</code>.</li>
+    <li>Demand: responses land in a <strong>caller-fed expect buffer</strong> instead of a fixed echo template. Each of the twelve caller sites (<code>0x40BC8C, 0x40CA02, 0x40CA5D, 0x40CB2B, 0x40CC02, 0x40CCEC, 0x40CE60, 0x40CF58, 0x40D0FE, 0x40D15F, 0x40D278, 0x40D2C4</code>) passes its own wanted-echo and retries (bounded by <code>evt nb</code>/<code>d5260</code>) inside <code>0x40D310</code>; windows '<a href="#fail-floor">below</a>'.</li>
+  </ul>
+</section>
+<section id="transport">
+  <h2>Transport wrappers (fact)</h2>
+  <ul>
+    <li><strong>Send wrapper <code>0x428680</code></strong> (stack 0x1108, cookie <code>esp+0x1104</code>): opens the interface path for device <code>[0x5b6d48]</code> with <code>CreateFileW</code> (share mode 3 first, retry without the extra-flags open on failure, dis <code>0x4286C0</code>/<code>0x4286D9</code>), zeroes a 4&nbsp;KB scratch, formats the log lines <code>FeatureStatus : %d</code> / <code>DeviceHandle : 0x%x</code> (<code>0x55FBB8</code>/<code>0x55FC24</code> via CString <code>0x52ACE5</code>), caps the send length at <code>0x1000-1</code> and calls <code>0x429744</code> → <code>jmp [HidD_SetOutputReport]</code>. Ret <code>sete</code>.</li>
+    <li><strong>Read wrapper <code>0x428810</code></strong> (stack 0x1008, cookie <code>esp+0x1004</code>): same open dance, sink buffer, <code>jmp [HidD_GetFeature]</code> at <code>0x4288B7</code>, then <code>CompareDevice...Revision 0x5aae50 += 1</code> accounting per call, log via <code>0x55FBE4</code> <code>FeatureReportByteLength : %d</code>, <code>sete</code> return.</li>
+    <li><strong>Pace helper <code>0x40b520</code></strong>: Win32 <code>Sleep(eax)</code> — sends are typically followed by two <code>Sleep(10)</code> ticks, then the read.</li>
+  </ul>
+</section>
+<section id="uploader">
+  <h2>The 0x4039C0 upload flow (fact)</h2>
+  <ul>
+    <li><strong>0x4039C0</strong> is dispatched per-chip with <code>0x33=51</code> stride records at <code>[0x5b30c7]</code> (chip-slot array). It reads the record's two UTF-16-word fields (<code>+0x27/+0x2B/+0x2F</code>) then builds the command schedule; a null data pointer at <code>[ecx+0x14]</code> bails early (branch to <code>0x4043fe</code>).</li>
+    <li>Order of helpers inside: <code>0x40b740</code> (12B variant of send <code>0x4029E0</code>-zone) → <code>0x40a550</code> restart-ok wrapper → progress-bar <code>0x407/0x408/0x40B/0x406</code> calls driving <code>0x55B870</code> (MFC progress) with 0..100 ranges; then command helpers <code>0x40b950</code> (0x22-zone), <code>0x40bb80</code> (0x07-zone), <code>0x40bea0</code> (0x27-zone), <code>0x40c360/0x40c6f0</code> (0x29/0x28-zone), <code>0x40ba60</code> (code-option variant at <code>+0x3fe0</code>), <code>0x40a7d0</code>, etc. The chain terminates in <code>0x40A510</code> (SetDlgItem/margin) and <code>0x40a550</code> (restart ok).</li>
+  </ul>
+</section>
+<section id="upload-ops">
+  <h2>Per-flow ops and read-back gates (fact)</h2>
+  <ul>
+    <li><strong>Per-flow ops confirmed via flow dispatch</strong>: erase disconnect (<code>0x40A1DE</code>esp-state clone), erase connect after (<code>0x40B8AB</code>-zone), 64-byte enable-program chunks (<code>0x40BAA9</code>, i.e. the "chip Erase..." of <code>0x589370</code>), <code>0x40BCE0/5</code>-zone ('0x408FDF' verify stack, '0x409D40' verify stack), '0x409D40' per-page verify where <code>0x40C360</code>/<code>0x40c6f0</code> read-back is re-fetched off the transport wrapper. Evidence: "Reload the Workspace and Switchers" flow at <code>0x403BB0</code>-zone + per-page verify logs (<code>0x403F65</code>/<code>0x403F86</code>, 0x409D40 verify stack).</li>
+    <li>Show-waves of the 0x4039C0 flow: 6-step reconnect checkpoints run through <code>0x40BEA0(9)</code> and <code>0x40c6f0</code> — the convertor masks of read-back protocol gates in the ISP zone.</li>
+  </ul>
+</section>
+<section id="commands">
+  <h2>Command table (fact)</h2>
+  <p>Wire formats verified at send sites (set_digest.txt); in every row below the cmd byte is wire index 0, <code>AA 55</code> indexes 1&#8211;2, payload follows at index 3+: <code>01 AA 55</code> Get FW Version (0x40B60B, 0x40B6C6); <code>02 AA 55</code> Compare Password (0x40B7A1, long 0x40 form 0x40BB07); <code>03 AA 55+algo</code> Set Encryption (0x40B8AB, 10-byte form 0x40BA3C); <code>04 AA 55</code> Enable Erase (0x40B9AD); <code>05 AA 55+addr+64B page</code> Enable Program (0x40BE2D, data frames 0x40BAA9); <code>06 AA 55</code> Get Check Sum (0x40BF17, 0x40C06B adds payload byte <code>01</code>); <code>07 AA 55+4B code-option</code> Set Code Option (0x40C19E); <code>08/09 AA 55+retap 01/02</code> Set/Get pair (0x40C22D, 0x40C2C2, 0x40C3D7, 0x40C456); <code>09 AA 55 (+5B seed)</code> and <code>0B AA 55 (+9B)</code> CS3 seed writes (0x40C537, 0x40C775, 0x40C8AF); <code>20..24 AA 55</code> ISP enter/verify family (0x40C9D5 cmd 0x20, 0x40CAFE 0x21, 0x40CBD5 0x22, 0x40CCBF 0x23, 0x40CD9D 0x24; one function per cmd; 0x40D310 echo-gated re-sends); <code>25 AA 55+payload (byte 04</code> at index 4<code>)</code> page write (0x40CE33); <code>26/27 AA 55</code> (0x40CF2B, 0x40D03E); <code>28/29 AA 55+retap</code> (0x40D0D1+0x40D149, 0x40D24B+0x40D2AE); <code>2A AA 55+5 zero bytes</code> upload token (0x40D36B). <em>Correction 2026-10-22:</em> an earlier pass read the rows <code>05 09/0B, 05 20..24, 05 25/26/27, 05 28/29, 05 2A</code> with a leading <code>05</code>; the send sites verify those bytes that follow the cmd are NOT prefixed &#8212; <code>09/0B</code>, <code>20..24</code>, <code>25</code>, <code>26/27</code>, <code>28/29</code>, <code>2A</code> are the actual cmd bytes (e.g. before the 0x40C537 send: 0x40C528 writes <code>[esp+0x10]=9</code>, 0x40C52D <code>AA@+0x11</code>, 0x40C532 <code>55@+0x12</code>). The re-send loop at 0x40C5BA/0x40C61D/0x40C680 progressively raises payload byte <code>01&#8594;02&#8594;03</code> until the echo matches &#8212; that is the single re-send mechanism the later rows reuse.</p>
+<p>All send/read windows are in <code>analysis/out/io_sites.txt</code>, the sentence per command in <code>analysis/out/set_digest.txt</code>. Flow glue in <code>isp_walk.txt</code> function dumps (0x4039C0 zone wrappers 0x40A550/0x40A510).</p>
+</section>
+<section id="no-read">
+  <h2>No flash-read command (fact)</h2>
+  <p>The AA 55 set programs, erases, verifies and checksums, but never dumps a flash range: the commands above cover version, password, encryption, erase-enable, 64-byte program, checksum, code-option, set/get option, seeds, ISP enter <code>0x20..0x24</code>, page write <code>0x25</code>, <code>0x26/0x27</code>, <code>0x28/0x29</code> and token <code>0x2A</code>. The reads in the flow are echo/status gates and per-page verify re-fetches — none returns bulk flash bytes.</p>
+  <p>Consequence for phase 6: the updater cannot make a stock backup of the device. The only stock copy is the factory image RCDATA 4000 inside the exe, and this tool cannot prove the device's flash matches it byte-for-byte. A pre-flash plan must say that outright rather than assume "backup first", and should demonstrate a recovery path (and prove the write path with the unmodified image on a second unit) before a modified image is tried.</p>
+</section>
+<section id="want-floor">
+  <h2>Want-floor: the "expected echo" gate</h2>
+  <p>0x40D310 is the single all-commands read + compare: the function does one 0x25/whatever read frame, then compares the first 4 bytes of the sink with the caller-supplied <code>(cmd,AA,55,…)</code> want-vector and, on mismatch, <strong>re-sends</strong> the caller's frame and re-reads — 12 callers hand it (frame, want) pairs. Only when the echo matches does 0x40D310 return '5' (success code) or '1'. The tables at <code>0x40D42A</code>/<code>0x40D3E0</code> show the second variant: <code>cmp al, 0xe1</code> + <code>dec [edi]</code> — a counter/flag-blob sanity check done inside the same function.</p>
+  <p>Frame sizes 8/10/12/64 bytes are the report formats 1–4 (<code>0x4421/0x4428/0x442F</code> cluster). The <code>0x409D40</code>-zone verify stack, when compared against the wire order, is the ISP-zone echo: <code>0x40C360</code> push <code>9</code>, readback at <code>0x40c6f0</code>, <code>0x40BEA0(9)</code>.</p>
+</section>
+<section id="code-option">
+  <h2>Code-option (fact)</h2>
+  <p><code>0x40C19E</code> sends SET code-option <code>07 AA 55 + 4 bytes</code>, <code>0x40C22D</code> fires the confirm <code>08 AA 55 + 01</code>, <code>0x40C2C2</code> feeds the readback to the expect gate for the '01'. The <code>0x40D149/0x40D2AE retap-01</code> trailing pair re-runs the whole echo-exchange after <code>05 28/29 AA 55</code> — a "final echo" of the option state.</p>
+</section>
+<section id="pw-wire">
+  <h2>Password &amp; erase-gate frames (fact)</h2>
+  <h3>Wire frames</h3>
+  <ul>
+    <li><strong>Short password frame (0x40B740)</strong>: 8 bytes <code>02 AA 55 00 &lt;4-byte dword&gt;</code> &#8212; the dword is read once via <code>mov eax,[ecx]</code> from the caller-supplied pointer arg, stored at frame index 4. Caller convention (verified at all 7 call sites, e.g. 0x40251F..0x40252E / 0x403A0C..0x403A19): the flow does <code>mov ecx,[this+0x1c]</code> (the flow-controller object's pw-pointer member), <code>push 2; push ecx; call 0x40B740; add esp,4</code> &#8212; frame buffer is the callee's own local, not a caller buffer. The wire password payload is therefore exactly <strong>4 bytes at <code>*(flowCtl+0x1c)</code></strong>, not the full 8-character string.</li>
+    <li><strong>Long password frame (0x40BAC0)</strong> (V2, <code>out/isp_pw6.txt</code>): 64-byte frame with buffer = transport object+4; writes <code>[obj+4]=02</code>, <code>[obj+5]=AA</code>, <code>[obj+6]=55</code>, zeros <code>[obj+7..0xd]</code> (frame indices 3&#8211;9), then one send of length <code>0x40</code>. No password bytes are copied by this function &#8212; pw travels only in the 8-byte short form; the long form's read gate (fn 0x40BB20, site 0x40BC05) still demands <code>echo[4..7] == [0x5b1d6c]</code>, so the device fills the 4-byte value.</li>
+    <li><strong>Callers and failure path</strong>: short form from seven flows (0x40252E, 0x402FEE, 0x403A19, 0x405FFD, 0x40678B, 0x408BAB, 0x409D90); long form from 0x407E53 only (fn 0x407CA0's <code>Codeoption Erase Protocol Handshake Error!!</code> check); the 0x40BB80 read-gate from six of the same flows. Erase/Codeoption flows treat these frames as their <em>Protocol Handshake</em> step: failure raises <code>0x40a550</code>'s restart path with a handshake MessageBox and status <code>0x1d</code>/<code>0xe</code> in <code>[obj+0xc0]</code>.</li>
+  </ul>
+  <h3>The pw-value gate &amp; global 0x5b1d6c</h3>
+  <ul>
+    <li>The tool loads the default ISP password from <code>FindResourceW(RT_RCDATA=10, id 0xFA7=4007)</code>; the resource is UTF-16LE <code>'12345678'</code> (16 bytes, terminator included). Extraction: <code>analysis/out/rcdata_4007.bin</code>.</li>
+    <li><strong>Read gate behind the short frame</strong> (esp accounting re-derived byte-exact, <code>out/isp_pw5.txt</code> U1 + <code>out/isp_pw2.txt</code> P5): the 8-byte <code>HidD_GetFeature</code> echo lands in the same local the send buffer used; then return <code>2</code> if the read fails, <code>4</code> if <code>echo[0..3] != sent[0..3]</code>, and the final compare <code>cmp [0x5b1d6c], echo[4..7]</code> &#8594; <code>sete al; add eax,4</code> &#8594; <strong>return 5 = pw match, 4 = pw mismatch</strong>. So <code>0x5b1d6c</code> is the tool's stored pw VALUE dword, and the device is expected to echo the matching 4-byte value at index 4. This gate-for-value pattern repeats in 10 more command fns (0x40BB20, 0x40BC40, 0x40BCE0, 0x40BEA0, 0x40BFF0, 0x40C140, 0x40CA90, 0x40CD40, 0x40CFE0, all <code>cmp [0x5b1d6c],[esp+0x18]</code>-shaped).</li>
+    <li><strong>The global 0x5b1d6c</strong>: .data initial value is <code>0xFAFAFAFA</code> &#8212; literally the only <code>FAFAFAFA</code> in the whole file, a deliberate poison/'not yet set' marker. All 16 .text references are <code>mov reg,[0x5b1d6c]</code> <em>reads</em> in echo gates; no addressed write, no <code>lea</code>-address-take, no base-pointer constant for the 0x5B1C00..0x5B2200 zone exists anywhere in the image (aligned full-zone sweep <code>out/isp_pw6.txt</code> V3), so the runtime writer is register-indirect (through the controller-object side of the <code>+0x1c</code> pathway or a runtime-computed base). The chain that must eventually supply it: RCDATA 4007 <code>'12345678'</code> (UTF-16LE, <code>out/rcdata_4007.bin</code>) &#8594; dialog CString member <code>+0xEC</code> (loader fn 0x427120; only caller 0x427660) &#8594; conversion &#8594; slot value.</li>
+    <li><strong>Status:</strong> wire shape verified; the exact byte semantics of the 4-byte payload (which conversion of the UTF-16 resource lands in the controller pw slot: ascii-'1234' 0x34333231, utf16-'12' 0x00320031, dec 12345678 = 0x00BC614E, or hex 0x12345678) remain open &#8212; the exe's <code>SHLWAPI!StrToInt64ExW</code> (STIF_SUPPORT_HEX) sites are candidates but not yet tied to this chain. The 16 read-gates pin one hard fact: tool-side stored pw dword <strong>must equal the device's echoed value</strong>, so tool and device agree on whichever encoding is chosen.</li>
+  </ul>
+</section>
+<section id="chip-registry">
+  <h2>Chip-name registry (SZK671F) &amp; the I2C verdict (fact)</h2>
+  <ul>
+    <li><strong>Registry strings</strong>: the chip-name table sits at <code>0x588F98..0x589074</code>: <code>SN34F280</code>, <code>SN32F24xC</code>, <code>SZK671F</code>, <code>SN32F290</code>, <code>SN32F280</code>, <code>SN8F5280</code>, <code>SN8F2267F</code>, <code>SN32F24xB</code>, <code>SN32F26x</code>, <code>SN8F22E8xB</code>, <code>SN32F22x</code>, <code>SN32F23x</code> (&#8216;Not Connected&#8217; heads it at 0x588F7C). <code>SZK671F</code> is one member of that family list, nothing more exotic.</li>
+    <li><strong>Installer sites</strong>: five near-identical registration code sites (<code>0x556285, 0x556735, 0x556CD0, 0x557D70, 0x558E50</code>, all in .text tail; disasm <code>analysis/out/isp_open.txt</code> &#8216;Q3b&#8217; and &#8216;Q6&#8217;) each build a per-protocol-variant copy of the chip list: they write globals in the <code>0x5BD020/0x5BD16x/0x5BD38x-0x5BD41x</code> zone with config ids <code>0x12..0x14</code> and a tag byte pair <code>0x22..0x25</code> on the stack slot, pushing each chip name string and ending in a common <code>push &lt;vtable&gt;</code> (0x55A070/0x55AAB0/0x55A140/0x55A2D0/0x55A310) + shared-call pattern. I.e. the tool keeps <em>five protocol variants</em>, each with its own chip-name list; the device gate selects between variants by matching the connected device against these names.</li>
+    <li><strong>EVT/I2C verdict</strong>: the exe contains no I2C/EVT machinery (searched: <code>I2C/IIC/Iic/i2c/EVT/evt</code> across every printable ASCII and UTF-16 run of the file). The two &#8216;<code>C&amp;C=IIC</code>&#8217; hits at <code>0x56B0FE/0x57EA5E</code> are harvest false-positives from pointer-table bytes (running bytes like <code>43 00 26 00 ...</code> read as UTF-16); the hex windows around them show code-pointer arrays, not strings. The tool's device surface remains HID-feature-reports only, matching the import map. <strong>The status item &#8216;EVT/I2C unlock&#8217; is closed: no such mechanism exists in this exe.</strong></li>
+  </ul>
+</section>
+<section id="fail-floor">
+  <h2>Finish-floor (fact)</h2>
+  <p>The last wire act before restart: after the 0x28/0x29 pair, the <code>01</code> retap echo confirms persisted state; failing it raises <code>0x40D310</code>'s '5' status and the flow ends (single-shot, no outer loop retry — the caller restarts the whole attach).</p>
+</section>
+</article>
+</body>
+</html>

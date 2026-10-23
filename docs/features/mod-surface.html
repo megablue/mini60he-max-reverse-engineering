@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="opencode-feature-map">
+<title>Modification surface — where a patch goes in RCDATA 4000, and what gates it</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>Modification surface — where a patch goes in RCDATA 4000, and what gates it</h1>
+<p class="status">Status: phase-5 inventory (data hooks, LED value tables, code constants and the four gates pinned byte-exactly, plus a remap planner that plans byte edits) and the Fn action enum decoded to a built four-byte bake (<code>out/fw_volplus.bin</code>, nothing flashed) · Read when: choosing a modification, planning a specific key remap, computing a patch offset, decoding an Fn output byte, or checking what a byte edit would break</p>
+
+<section id="what-it-is">
+  <h2>What it is</h2>
+  <p>Every candidate mod — key remap, rapid-trigger tuning, lighting — reduced to <strong>an image offset, a unit of edit and the code that reads it</strong>. The artifact is <code>analysis/fw_patch.py</code> → <code>analysis/out/fw_patch.txt</code>, regenerated from the pinned image (<code>0x7E000</code> B, SHA-256 <code>06A1A474…4A88E0</code>); the chip-record size gate is <code>analysis/isp_gate.py</code> → <code>analysis/out/isp_gate.txt</code>. Image offsets equal flash addresses because the vector table sits at <code>0x0</code>.</p>
+  <ul>
+    <li>Three key-remap hooks, all plain table edits: the usage table, the four per-OS Fn overlays, and the physical scan grid.</li>
+    <li>Actuation and debounce are <strong>two data tables plus three code immediates</strong> — the tables set defaults, the immediates set behaviour.</li>
+    <li>Lighting is reachable as pure value runs (palette, hue ramp, presets); the ramp band is mixed data and must be treated as fragile.</li>
+    <li>Four gates decide whether a patched image is accepted: length, version word, tool-side checksum, signature (last one absent).</li>
+    <li>Nothing here builds or writes an image: phase 6 stays user-gated per <a href="../PLAN.html">the plan</a>.</li>
+  </ul>
+</section>
+
+<section id="key-remap">
+  <h2>Key remap — three hooks (fact)</h2>
+  <table>
+  <thead><tr><th>Hook</th><th>Offsets</th><th>Unit</th><th>Effect</th></tr></thead>
+  <tbody>
+  <tr><td>Usage ↔ id</td><td><code>0x16DD8</code>–<code>0x16ECA</code></td><td>2 B per key, edit byte 1</td><td>the HID usage a logical id sends — the primary remap</td></tr>
+  <tr><td>Fn overlays</td><td><code>0x16C3E</code>, <code>0x16CA6</code>, <code>0x16D0C</code>, <code>0x16D72</code></td><td>51 rows × 2 B per layer, edit byte 1</td><td>the output code Fn+key produces, per OS layer</td></tr>
+  <tr><td>Scan grid</td><td><code>0x16A96</code>–<code>0x16B16</code></td><td>1 B per physical cell</td><td>which logical id a matrix position reports</td></tr>
+  </tbody>
+  </table>
+  <ul>
+    <li><strong>Usage table.</strong> Sentinel <code>(0x7D,0x00)</code> first, then 120 pairs; the u16 count at <code>0x16EC8</code> is <code>120</code>. Read by the usage→id search <code>0x327C</code>. Leave byte 0 (the id) alone; changing it re-targets an id rather than a key.</li>
+    <li><strong>Fn overlays.</strong> Only layer 0 searches byte 0 (the pressed usage, <code>0x7378</code>); layers 1–3 have byte 1 read directly. Layer 2 has no writer for the mode byte, so editing it changes nothing at runtime.</li>
+    <li><strong>Mode byte writers.</strong> <code>0x200000AE</code> is written in <code>0x2AE4</code> itself: <code>1</code> at <code>0x2B3C</code> (Mac), <code>0</code> at <code>0x2B5E</code> (Windows), <code>3</code> at <code>0x2B80</code> (Android); the trigger codes <code>0xAC/0xAB/0x9C</code> are compared at <code>0x2B26/0x2B2A/0x2B2E</code>. Mode 2 is still unreachable.</li>
+    <li><strong>Traps.</strong> Duplicate usages are not rejected — two keys then report the same usage. A scan-grid id that no table knows leaves a dead position; the per-key RAM arrays are 128 entries, so ids stay under that.</li>
+  </ul>
+</section>
+
+<section id="remap-plan">
+  <h2>Worked remap plan — CapsLock sends Esc</h2>
+  <p><code>analysis/fw_remap.py</code> → <code>analysis/out/fw_remap.txt</code> is the planner: it resolves a request like <code>{"key": "CapsLock", "to": "Esc"}</code> through the current map, validates it, and prints the byte edits. It never writes an image — building one is phase 6.</p>
+  <pre class="verbatim" data-why="these are the exact image bytes an edit changes">
+id 0x30 currently sends 0x39 (CapsLock)
+usage byte for id 0x30 sits at  0x16E3B   (0x16DDA + 2*index, index 48)
+
+0x16E33  30 2d 5f 2e 60 2f 61 30 [39] 31 04 32 16 33 07 34   before
+0x16E33  30 2d 5f 2e 60 2f 61 30 [29] 31 04 32 16 33 07 34   after
+</pre>
+  <ul>
+    <li><strong>One byte.</strong> Length, checksum and every other field are untouched; the version word below <code>0x16A96</code> keeps its value.</li>
+    <li><strong>Validation the planner reports.</strong> The target id must appear in the scan grid (id <code>0x30</code> does), the new usage must not be <code>0x00</code>, and a duplicate is flagged only when the edit <em>creates</em> one — here usage <code>0x29</code> already belongs to id <code>0x00</code>, so the report says "merges onto ids 00, 30": two keys with one function, which is the intent.</li>
+    <li><strong>Swaps</strong> are two requests in the same list; the plan is computed from the original table in one pass, so order does not matter.</li>
+    <li><strong>Free rows.</strong> Ids <code>0x0D</code>, <code>0x0E</code>, <code>0x0F</code>, <code>0x60</code>, <code>0x71</code>, <code>0x72</code>, <code>0x78</code> send usage <code>0x00</code>; none is physical, so they are spare table rows rather than spare keys.</li>
+    <li><strong>Unverified.</strong> Nothing shows the companion app writing a keymap at runtime; if it does, a firmware-side edit could be overridden. That needs a capture, not more static analysis.</li>
+  </ul>
+</section>
+
+<section id="fn-actions">
+  <h2>Fn actions — the vendor enum (fact)</h2>
+  <p>The Fn output byte is <em>not</em> a HID usage. It is a vendor action code, and <code>0xB0 + k</code> indexes a u16 table of consumer usages at <code>0x16BF6</code>. Four members were confirmed on the keyboard; that fixes the offset and makes the rest readable.</p>
+  <pre class="verbatim" data-why="enum bytes and table entries exactly as they sit in the image">
+enum  table   action        source
+B0    B5 00   Next          Fn+F9  verified on keyboard
+B1    B6 00   Previous      Fn+F7  verified on keyboard
+B2    B7 00   Stop          table
+B3    CD 00   Play/Pause    Fn+F8  verified on keyboard
+B4    E0 00   Volume        table
+B5    E2 00   Mute          Fn+F10 verified on keyboard
+B6    E3 00   Bass Boost    table
+B7    E4 00   Loudness      table
+B8    E5 00   Bass Down     table
+B9    E9 00   Volume Up     table
+BA    EA 00   Volume Down   table
+</pre>
+  <h3>A dead row to spend</h3>
+  <p>Layer 0 has 51 rows keyed by input usage, and only 13 can never fire on this board: rows 1–12 are keyed on <code>F1..F12</code> (a 60% has no F-row) and row 32 on <code>0x4C</code> Insert — no scan position emits that usage. Row 32 maps Insert → Delete, so repurposing it costs nothing:</p>
+  <pre class="verbatim" data-why="the exact two bytes of the patch">
+0x16C7E  4C 49   row 32: Insert -> Delete             before
+0x16C7E  4F B9   row 32: Right Arrow -> Volume Up     after
+</pre>
+  <ul>
+    <li><strong>No length change, no relocation.</strong> Row count at <code>0x16CA4</code> stays 51 and every byte below <code>0x16A96</code> is untouched, so the version gate and the RCDATA size gate see a factory-shaped image.</li>
+    <li><strong>Volume already ships.</strong> Rows 11/12 map <code>F11</code>/<code>F12</code> to <code>0xBA</code>/<code>0xB9</code>, so <code>Fn+F11</code> and <code>Fn+F12</code> are Volume Down/Up on stock firmware — a free check of the whole chain before any write.</li>
+    <li><strong>Dependency.</strong> The Fn lookup reads the usage that reaches <code>[0x2000008C]</code>, so Right Arrow has to be the usage the key actually sends. The four-byte bake below makes that true in firmware; see <a href="#fn-bake">the bake</a>.</li>
+  </ul>
+</section>
+
+<section id="fn-bake">
+  <h2>Fn + Right Arrow — the four-byte bake</h2>
+  <p>The Fn <em>state</em> is keyed on the usage value <code>0xAF</code>, not on a key id: on the owner's keyboard the key at the old <code>RAlt</code> position produces <code>Fn+1 = F1</code> today, only because an app remap put <code>0xAF</code> on it. The usage table at <code>0x16DDA</code> is one <code>(id, usage)</code> pair per key, so moving a value between two ids moves the role between two physical keys — and the owner's intended keys are exactly the two that now hold the swapped pair:</p>
+  <pre class="verbatim" data-why="the four bytes written by analysis/fw_volpatch.py">
+0x16C7E  4C -> 4F   Fn map row 32: Insert becomes Right Arrow
+0x16C7F  49 -> B9   Fn map row 32: Delete becomes Volume Up
+0x16E83  E6 -> AF   id 0x54 (old RAlt) becomes Fn
+0x16E85  AF -> 4F   id 0x55 (stock Fn) becomes Right Arrow
+</pre>
+  <ul>
+    <li><strong>Net behaviour.</strong> Old <code>RAlt</code> key = Fn; old Fn key = Right Arrow; Fn + Right Arrow = Volume Up (<code>0xB9</code> → consumer <code>0x00E9</code>). <code>RAlt</code> and the factory Fn position are gone — that is the trade the owner asked for.</li>
+    <li><strong>Independent of the app.</strong> Because both usages are in the table, no NVM remap has to be active; re-flashing the whole image would otherwise wipe those pages. Ids keep their scan positions, so per-key actuation records stay on the same physical keys.</li>
+    <li><strong>Still in the gates.</strong> Four bytes, no length change, all at or above <code>0x16A96</code>; the version word below it and the RCDATA size are untouched. <code>analysis/fw_volpatch.py --chord-only</code> builds the two-byte variant for the case where the app remap is guaranteed to stay.</li>
+  </ul>
+</section>
+
+<section id="actuation">
+  <h2>Actuation and debounce (data + code)</h2>
+  <ul>
+    <li><strong>Default tables.</strong> <code>0x8400</code> is 112 × u16, all <code>0x960</code> (2400); <code>0x8500</code> is 112 × u16, all <code>0x640</code> (1600). They are copied into the per-key RAM arrays by the loader at <code>0x58FE–0x5990</code>.</li>
+    <li><strong>Code seeds.</strong> <code>0x33D0</code> and <code>0x33D8</code> write those two literals into the per-key arrays when the NVM page is blank; <code>0x33E0</code> loads <code>0x8400</code> as a <em>table base</em>.</li>
+    <li><strong>Catalog.</strong> <code>0x9600</code>, 112 records × 4 B: 102 kind-2 (usage in bytes 2–3) and 10 kind-3 (firmware function in bytes 1–2; first at record #13, <code>03 e9 00 00</code> = volume up).</li>
+    <li><strong>NVM page.</strong> <code>0xB000 + id*4</code> and <code>0xB600 + id*8</code> are blank in the factory image, so defaults are synthesized in code. Editing them sets defaults, but a settings save from the companion app overwrites them.</li>
+  </ul>
+  <p>Behaviour constants are instructions, not tables — copied exactly so a patcher can find them:</p>
+  <pre class="verbatim" data-why="instruction bytes must match the pinned image for a byte patch">
+0x3764  a1f10c0c  sub.w  ip, r1, #0xc    ; hysteresis, 12 counts (cmp at 0x3768)
+0x54DE  0a2e      cmp    r6, #0xa        ; commit at |delta| >= 10
+0x54A6  41f28836  movw   r6, #0x1388     ; hold timer, 5000
+0x54BC  24f81160  strh.w r6, [r4, r1, lsl #1]   ; timer reload on no change
+</pre>
+  <p><strong>Correction recorded here:</strong> earlier notes called <code>0x33D0/0x33D8/0x33E0</code> "threshold compares". The bytes are two <code>strh</code> seeds and one table-base add — they initialize, they do not decide.</p>
+</section>
+
+<section id="lighting">
+  <h2>Lighting — value tables</h2>
+  <ul>
+    <li><code>0x17668</code> — palette triplets: <code>ff0000 ff8000 ffff00</code>.</li>
+    <li><code>0x17837</code> — RGB hue ramp, <code>ff0000</code>, <code>ff0100</code>, <code>ff0200</code>, … <code>ffff00</code> (553 B).</li>
+    <li><code>0x17A83</code> — preset runs: <code>c8 96 64 4b 19 19</code> then <code>c8 96 64 4b 28 28</code> (200/150/100/75/25).</li>
+    <li><code>0x170B9</code>–<code>0x17354</code> — ramp/fade tables (arithmetic byte ramps; mixed with literals).</li>
+    <li><code>0x16FF6</code> — 12 W-pair bytes; <code>0x17E38</code>–<code>0x17F00</code> — per-profile hues with <code>01 1d</code> headers.</li>
+    <li><code>0x174B9</code> — 16-byte cell records; semantics still open, do not edit blind.</li>
+  </ul>
+  <p>Safe first targets are the palette, the hue ramp and the preset run: pure value runs with no code pointers. A wrong edit inside <code>0x170B9–0x17354</code> breaks the ramp engine rather than merely recolouring.</p>
+</section>
+
+<section id="gates">
+  <h2>Gates a patch must survive</h2>
+  <ul>
+    <li><strong>Length.</strong> The RCDATA size gate (<code>0x4272BD</code>) compares the loaded size against <code>0x8400</code> for chip records whose field 0 is zero; records 9–11 have field 0 = 1 and skip the check. Patching in place keeps the length, so the verdict is identical to the stock flow — only growing the image can add a new failure.</li>
+    <li><strong>Version word.</strong> The upload flow (<code>0x40144C–0x401486</code>) compares one image dword against the device's four version bytes; the index comes from the chip record (<code>+0x1F → +0xD</code>). Keep the head of the image — everything below the first table at <code>0x16A96</code> — byte-identical.</li>
+    <li><strong>Tool-side checksum.</strong> No checksum field lives in the image; the tool recomputes (<code>0x40A800</code> big-endian 16-bit word sum, <code>0x40A7D0</code> 32-bit byte sum) from the file it loaded, so a patched image is self-consistent and the displayed value changes.</li>
+    <li><strong>Signature.</strong> The Authenticode signature covers the exe, not RCDATA 4000, and no signature check appears in the upload path. The real failure mode is an interrupted write, with the bootloader outside the <code>0x7E000</code> span.</li>
+  </ul>
+</section>
+
+<section id="not-established">
+  <h2>Not established</h2>
+  <ul>
+    <li>Which image dword the version gate reads for this chip (the index is a record field; the offset follows from it).</li>
+    <li>The <code>0xB000</code>/<code>0xB600</code> NVM record layout, and whether an in-image default survives the first settings save.</li>
+    <li>Cell-record semantics at <code>0x174B9</code>.</li>
+    <li>Whether pages are encrypted before write — the <code>Set Encryption Algorithm</code> command exists; its default state is unknown.</li>
+    <li>Everything is static: no modification has been built, flashed or observed on hardware.</li>
+  </ul>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="key-pipeline.html">Key pipeline &amp; remap surface</a> — the pipeline these offsets sit in, and the per-OS layer semantics.</li>
+    <li><a href="fw-tables.html">Keymap &amp; LED tables</a> — the band map around the lighting tables.</li>
+    <li><a href="fw-image.html">Firmware image</a> — vector table, region map, checksum hunt.</li>
+    <li><a href="isp-protocol.html">ISP protocol</a> — the AA 55 command set that would carry a patched image.</li>
+    <li><a href="../PLAN.html">Plan</a> — phase 5 (this inventory) and the user-gated phase 6.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

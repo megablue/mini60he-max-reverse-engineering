@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="opencode-feature-map">
+<title>Binary evidence — pinned stock binary</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>Binary evidence — the pinned stock binary</h1>
+<p class="status">Status: pinned binary + phase-1 census extracted (analysis/probe_pe.py) · Read when: verifying a claim traced to the binary, re-hashing by hand, or tracing an extracted fact to its artifact</p>
+
+<section id="what-it-does">
+  <h2>What it does</h2>
+  <ul>
+    <li>Not a feature: the ground-truth record of the one stock artifact every claim is checked against — <code>bin/MINI 60 HE MAX_V1.52.exe</code>.</li>
+    <li>Phase-1 census extracted reproducibly (see <em>Census</em>); the 0x7E000-byte RCDATA 4000 image and the ISP protocol are decoded in phases 2–3 on their own feature pages.</li>
+    <li>Facts are re-derived, never trusted — see <em>How &amp; why</em> before publishing any claim that traces to the binary.</li>
+  </ul>
+</section>
+
+<section id="pin">
+  <h2>The pin</h2>
+  <table>
+    <thead><tr><th>Fact</th><th>Value</th><th>Re-derive with</th></tr></thead>
+    <tbody>
+      <tr><td>File</td><td><code>bin/MINI 60 HE MAX_V1.52.exe</code></td><td>list the workspace</td></tr>
+      <tr><td>Size</td><td>2,386,384 bytes</td><td><code>(Get-Item …).Length</code></td></tr>
+      <tr><td>PE FileVersion / ProductVersion</td><td>2.1.2.13</td><td><code>.VersionInfo.FileVersion</code></td></tr>
+      <tr><td>SHA-256 (the pin)</td><td><code>958A39951D2F908A7FE925E0FA598C321924CB235239BF37484AE7C8213512D6</code></td><td><code>Get-FileHash -Algorithm SHA256</code></td></tr>
+      <tr><td>Version strings</td><td>ProductName / CompanyName empty; <code>LegalCopyright</code> = "Copyright (c) 2008- Sonix Technology Co., LTD. All Rights Reserved."; About-bar table says <code>Version 2.1.2.7</code>; UI brand <code>EVision 幻彩 V01</code> — see <a href="fw-image.html">Firmware image</a> · <strong>product identity</strong> for the image-side string</td><td><code>python analysis/probe_pe.py</code> → <code>out/fileinfo.txt</code>, <code>out/rt_string.txt</code></td></tr>
+      <tr><td>Tool build time (RCDATA 4013)</td><td>2026/01/21 10:53</td><td><code>out/rcdata_4013.bin</code></td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="how-why">
+  <h2>How &amp; why</h2>
+  <p><code>bin/</code> is immutable (hard rule in <code>AGENTS.md</code>) so every documentation claim has one unchanged referent. Before publishing a claim traced to the binary, re-hash and confirm it still matches the pin — a swapped file must not be able to silently invalidate the docs:</p>
+  <pre class="pseudo"># from the workspace root (PowerShell)
+(Get-FileHash -LiteralPath 'bin\MINI 60 HE MAX_V1.52.exe' -Algorithm SHA256).Hash
+(Get-Item -LiteralPath 'bin\MINI 60 HE MAX_V1.52.exe').VersionInfo.FileVersion</pre>
+</section>
+
+<section id="census">
+  <h2>Census — static extraction</h2>
+  <p><code>analysis/probe_pe.py</code> (run 2026-10-22, pin-enforced) parses the exe as data — it never runs it — and writes deterministic artifacts to <code>analysis/out/</code>; <code>census.txt</code> is the summary. Re-run: <code>python analysis/probe_pe.py</code>.</p>
+  <ul>
+    <li><strong>Imports:</strong> 19 DLLs / 599 functions. Device-facing surface is only <code>HID.DLL</code> (HidD_Get/SetFeature, HidD_GetAttributes, HidP_GetCaps, …) and SETUPAPI enumeration — confirms the no-device-contact fence is testable from the import table alone.</li>
+    <li><strong>RT_RCDATA:</strong> 10 entries, 559,080 bytes. id 4000 holds 516,096 bytes (0x7E000, entropy 1.740), head dwords <code>200076f8 00000205 0000021b 0000518d …</code>, tail <code>…5555 aaaa</code> — the candidate firmware image; its decode is phase 2. id 4011 is a valid zip of 12 skin/UI files (<code>out/rcdata_4011.zip</code>).</li>
+    <li><strong>Small RCDATA (UTF-16 strings):</strong> 4007 '12345678' (ISP password), 4008 '0C45', 4009 '80A1', 4010 'SN34F280', 4012 one blank byte, 4013 build time <code>Build time:2026/01/21 10:53</code>, 4014 '108A' (board), 4016 'SN34F280_User.hex'. 4008 + 4009 are read by the UI as the target's VID/PID, so 108A means VID <code>0x0C45</code> / PID <code>0x80A1</code>. 4015 does not exist. A separate UTF-16 string names the file the tool would expect: <code>108ASN34F280_User.hex</code> (in both the ASCII and UTF-16 string dumps).</li>
+  </ul>
+  <h3>Strings and signature</h3>
+  <ul>
+    <li><strong>Strings:</strong> 9,654 ASCII / 1,100 UTF-16 (min 4 chars); 159 keyword hits in <code>out/strings_sonix_isp.txt</code>: ISP commands with report codes ("Enter ISP Mode (0x20)", "Compare ISP Password (0x02)/(0x22)", "Set Encryption Algorithm (0x03)/(0x23)", checksum messages), the SN8F-series chip list, and the UI brand <code>EVision 幻彩 V01</code>.</li>
+    <li><strong>Authenticode:</strong> the security directory is the file overlay (offset 0x243800, size 0x31D0, ends the file exactly) → <code>out/cert_pkcs7.bin</code>; <code>analysis/probe_cert.py</code> walks it without a crypto library and writes <code>out/cert_info.txt</code>.</li>
+    <li><strong>Signer (verified):</strong> leaf <code>Chinese FINDER(Dongguan) Technology Co., Ltd.</code> — C=CN, ST=广东省, serialNumber <code>91441900MA544M5385</code>, Private Organization — issued by <code>Sectigo Public Code Signing CA EV R36</code> under the EV code-signing policy <code>2.23.140.1.3</code>; valid 2025-01-08 → 2027-01-08; SHA-1 thumbprint <code>B2DD667C67925DD4E7F0EC5F3479F26C26CAB3F1</code>. Seven certificates total: the four-cert Sectigo chain plus a three-cert DigiCert chain for the RFC 3161 timestamp (<code>DigiCert SHA256 RSA4096 Timestamp Responder 2025 1</code>). The token's own <code>genTime</code> is <code>2026-01-21 09:46:42Z</code>, which matches RCDATA 4013's build string <code>2026/01/21 10:53</code> — the file was signed the day it was built. The TSA certificate merely <em>starts</em> 2025-06-04, so reading that date as the timestamp misleads.</li>
+  </ul>
+</section>
+
+<section id="traps">
+  <h2>Traps</h2>
+  <ul>
+    <li><strong>The file name lies about the version.</strong> <code>…V1.52.exe</code> reports PE version <code>2.1.2.13</code>; a reader who keys on "V1.52" is already off.</li>
+    <li><strong>Blank identity strings, but not anonymous.</strong> ProductName and CompanyName are empty while <code>LegalCopyright</code> names Sonix outright and the About-bar string table says <code>Version 2.1.2.7</code> against PE <code>2.1.2.13</code> — the app self-reports two different versions; cite both.</li>
+    <li><strong>The identity splits in two, and only one half was open.</strong> The <em>tool</em> calls itself "SONiX USB MCU ISP Tool" (Sonix copyright, About version 2.1.2.7) with one UI string <code>EVision 幻彩 V01</code> (幻彩 = RGB branding) — a rebranded SONiX tool. The <em>firmware</em> half closes the name question: RCDATA 4000 carries <code>MINI60HE MAX</code> at 0x12060 and 0x16F7E, so "Mini60 HE Max" is no longer file-name-only. Cite the hash for the exe, and <a href="fw-image.html">Firmware image</a> for the product string.</li>
+    <li><strong>The signer is the manufacturer, not the tool's author.</strong> Authenticode names Chinese FINDER(Dongguan) Technology Co., Ltd. while the About box names SONiX — signing identity answers "who built this copy", not "who wrote the ISP tool". Do not treat the cert CN as the product vendor.</li>
+  </ul>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="fw-image.html">Firmware image</a> — the RCDATA 4000 decode that this probe feeds.</li>
+    <li><code>AGENTS.md</code> — the <code>bin/</code> immutability and name-lies hard rules.</li>
+    <li><code>docs/SPEC.md</code> — Scope, which fixes how the product is framed.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

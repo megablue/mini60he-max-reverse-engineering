@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="generator" content="opencode-feature-map">
+<title>Firmware image — RCDATA 4000 (candidate SN34F280 firmware)</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>Firmware image — the embedded RCDATA 4000</h1>
+<p class="status">Status: core decode verified (vector table, regions, product string); checksum formula + version gate now verified as tool-side runtime compare (nothing embedded in the image); no radio/companion-chip path (negative evidence) · Read when: touching <code>analysis/decode_fw.py</code>, interpreting anything at a flash offset, planning a patched image, or asking whether the board carries 2.4G/Bluetooth</p>
+
+<section id="what-it-does">
+  <h2>What it is</h2>
+  <ul>
+    <li>RCDATA id 4000 from the pinned exe — 516,096 bytes (<code>0x7E000</code>), extracted by <code>analysis/probe_pe.py</code> to <code>analysis/out/rcdata_4000.bin</code>. Decoded by <code>analysis/decode_fw.py</code>; full report <code>analysis/out/fw_decode.txt</code>, strings <code>fw_strings.txt</code>.</li>
+    <li>Cortex-M3-style firmware image (fact): vector table at 0x0, Thumb code, SNiX USB-device library inside, ASCII product string <code>MINI60HE MAX</code>. RCDATA 4010/4016 name the tool-side target: <code>SN34F280</code>, file <code>SN34F280_User.hex</code>.</li>
+    <li>Verified Thumb, not ARM: every vector address has bit0 set and is 4-misaligned (ARM requires the opposite); in-window thumb disassembly yields 50–57 valid instructions before the first invalid vs 4–28 for ARM. <code>push.w</code>/<code>mov.w</code>/<code>muls</code> appear ⇒ not a Cortex-M0.</li>
+  </ul>
+</section>
+
+<section id="vector">
+  <h2>Vector table (fact)</h2>
+  <pre class="pseudo">v[0]  SP = 0x200076F8          # SRAM top — RAM begins 0x20000000
+v[1]  Reset     0x204          # real code: sets SRAM-backed bit16 x2, bx jumps
+v[3]  HardFault 0x518C         # real handler: dsb + fault-capture writes
+v[15] SysTick   0x10BA8        # push {r4,lr}; bl 0x3FE8
+default IRQ     0x22C          # "b ." self-loop stub
+real IRQs       19, 27, 34, 40, 51, 54  (0x10780, 0x23E4, 0xFC8, 0x204C, 0x8FF0, 0x10F08)
+v[61]           0x205C         # writes 0xFFF via [r1+0x3C]
+tail damage-stub region: 0x21A..0x22C all "b ." self loops</pre>
+  <p>The reset handler thumbs through two 4-byte writes (bit16 clear then set of a config word) before jumping through a loaded pointer — periph-clock config, exact target unverified.</p>
+</section>
+
+<section id="regions">
+  <h2>Flash-region map (fact — derived from image bytes)</h2>
+  <table>
+    <thead><tr><th>Range</th><th>Size</th><th>Entropy</th><th>Class</th></tr></thead>
+    <tbody>
+      <tr><td>0x0000–0x980F</td><td>38,415 B</td><td>6.54</td><td>main code: vector table, handlers, runtime</td></tr>
+      <tr><td>0xAE10–0xAFFF</td><td>496 B</td><td>—</td><td>isolated code chunk + literal pool (points at RAM 0x20000408, flash 0x17354)</td></tr>
+      <tr><td>0xBA00–0x185E8</td><td>51.2 KiB</td><td>6.92</td><td>USB stack + debug strings + descriptor templates + font/gradient tables (0x16E00+)</td></tr>
+      <tr><td>0x7DFFC–0x7DFFF</td><td>4 B</td><td>—</td><td>tail magic dword 0xAAAA5555 (bytes <code>55 55 AA AA</code>), sole occurrence in the image</td></tr>
+      <tr><td>everything else</td><td>~436 KiB</td><td>0.00</td><td>0x00 fill — no 0xFF anywhere</td></tr>
+    </tbody>
+  </table>
+  <p>Around <code>0x18044</code>: a run of cooked descriptor-size/tag prefixes (<code>09 04 / 21 10 01 23 01 22 1C / 07 05 …</code>) wrapping the ASCII string <code>HID Interface</code> — descriptor templates, the phase-4 target.</p>
+</section>
+
+<section id="identity">
+  <h2>Product identity (fact — the file-name trap closes)</h2>
+  <ul>
+<li>"<strong>MINI60HE MAX</strong>" occurs twice in the firmware itself (0x12060 in code/literal context, 0x16F7E inside a string-table with length byte 0x58) — the keyboard's own USB strings; RCDATA 4013 pins the tool build to 2026/01/21.</li>
+<li>The exe's file name "Mini60 HE Max"/UI strings are no longer independent claims for product identity.</li>
+</ul>
+</section>
+
+<section id="wireless">
+  <h2>No radio or companion-chip path (negative evidence)</h2>
+  <p>Scanned by <code>analysis/probe_radio.py</code> → <code>out/probe_radio.txt</code>; regenerable, image hash pinned.</p>
+  <ul>
+    <li><strong>No wireless vocabulary:</strong> zero ASCII and zero UTF-16LE hits for <code>Bluetooth</code>, <code>BLE</code>, <code>2.4G</code>/<code>2G4</code>, <code>Wireless</code>, <code>PAIR</code>/<code>PAIRING</code>, <code>DONGLE</code>, <code>nRF</code>, <code>ESP32</code>, <code>RADIO</code> — and zero for <code>UART</code>, <code>USART</code>, <code>SPI</code>, <code>I2C</code>, <code>IIC</code>.</li>
+    <li><strong>No bus to a second chip:</strong> the recursive-descent map (<code>out/fw_code.txt</code>) reaches nine peripheral blocks only — USB device (<code>0x4001F0xx</code>/<code>0x4001F8xx</code>), LED driver (<code>0x4001B1xx</code>/<code>0x4001B2xx</code>), Hall AFE (<code>0x40027000</code>), four GPIO banks (<code>0x40037000</code>/<code>0x40038000</code>/<code>0x40039000</code>/<code>0x4003A000</code>), one clock/config word (<code>0x4002103C</code>) and the flash/EEPROM controller (<code>0x40057000</code>). No serial controller appears.</li>
+    <li><strong>One HID interface</strong> (<code>HID Interface</code>, 0x18044); the USB stack's strings are only its own range-check messages.</li>
+    <li><strong>Size fits a wired build:</strong> ~90 KiB of code/data in three blobs, ~416 KiB zero fill — a BLE stack would be another large blob, and there is none.</li>
+    <li><strong>The updater agrees:</strong> one hardcoded wired identity (VID/PID) and an all-wired SONiX chip table; no pairing/dongle command in the AA 55 set.</li>
+  </ul>
+  <p>Caveat: this is negative evidence about the MCU image, not knowledge of the PCB. If the board does carry 2.4G + Bluetooth, it is a separate RF SoC with its own firmware and updater — it would need its own USB path, because this SN34F280 image has no link to drive it. Board markings, the module shield or the vendor spec settle it.</p>
+</section>
+
+<section id="open">
+  <h2>Checksum &amp; version fields (compare side verified; image carries none)</h2>
+  <h3>Verified tool-side (2026-10-22)</h3>
+  <ul>
+    <li>No checksum sits in the image (fact): sum16/sum32/crc32/negsum16 over five windows, searched at every 4-aligned offset — zero matches. Only the tail magic exists. The load-time checksum is tool-side, no firmware byte carries it: fn <code>0x40A7D0</code> = plain 32-bit byte-sum Σ<code>buf[i]</code> over <code>len</code> bytes (SN8 path); fn <code>0x40A800</code> = <strong>big-endian-16 word-sum</strong> Σ<code>buf[i] + (buf[i+1] &lt;&lt; 8)</code> per 2-byte pair over <code>len</code>, truncated to 16 bit at return (<code>movzx eax,cx</code>) — fed by the bin/hex loaders and displayed as <code>'Bin File Check Sum : %.4X'</code> / <code>'HEX File Check Sum : %.4X'</code> (refs at 0x424487/0x42446E in fn 0x423F80) with the computed word in <code>[dlg+0x42C]</code>. Any future patched build must keep the loader-side sum consistent with what the ISP flow tells the device, or at least survive the tool's version/sum screens.</li>
+    <li><strong>Version gate verified</strong>: dispatcher fn <code>0x401100</code> reads the per-chip record pointer array at <code>0x5B30C7</code> (stride 0x33, variant byte array at <code>0x5B30B2</code>), takes the record's <code>+9</code> dword as a <em>word-index</em>, reads the version dword at <code>fwbuf + idx*2</code> (fwbuf = <code>[dlg+0x1E44]</code>), and compares it against the 4 device-reported version bytes (<code>cmp dword, then 4 byte-diffs</code> at 0x40144C..0x401486) — mismatch ⇒ 'Firmware Version is not for this chip!!' (0x589840) / SN8-variant ⇒ 'Firmware Version in SN8 file does not match that of USB Device!' (0x589A90). The version-offset word index itself lives behind the record <code>+0x1F</code> pointer's member <code>+0xD</code> (fn 0x423F80 stores it in <code>[dlg+0x1B94]</code>).</li>
+  </ul>
+  <h3>Still hypothesis</h3>
+  <ul>
+    <li>Hypothesis narrowed: the absence of any version/checksum constant in the image strengthens 'tool-side compare against the device read-back' — so a patched firmware needs its version dword (at the record index) and loader checksum updated in step. The device's bootloader-side pw/table constants are NOT part of this user image (all four candidate encodings absent — V1, <code>out/isp_pw6.txt</code>).</li>
+    <li>The 0x7E000 span (512 KiB − 8 KiB) is consistent with a 512 KiB flash device minus an 8 KiB bootloader reserve (CheckBootLoaderID), but the device's true flash size is unverified — the image may equally be a fixed-size buffer around a ~0x18600-byte build.</li>
+  </ul>
+</section>
+
+<section id="traps">
+  <h2>Traps</h2>
+  <ul>
+    <li><strong>0x00, not 0xFF, is the empty state in this image.</strong> Treating erased-flash conventions ("0xFF fill") as read on this image sends every scan to nothing: no 0xFF page exists anywhere.</li>
+    <li><strong>"Firmware" is a short label for a candidate.</strong> Identity is strong (vector table + USB stack + product string) but the chip model SN34F280 comes from the tool's RCDATA, not from the image.</li>
+    <li><strong>Vector-entry stubs are literal-pool territory.</strong> Between the real vectors the bytes at 0x22E..0x23A mis-decode as instructions (<code>and r0, r4, #0x81000000…</code>) — that is pool data, not code; do not disassemble blind forward from a stub.</li>
+    <li><strong>The two code-island gaps are real.</strong> Any patch address lifted from one blob assumes one contiguous code blob — the 0x9810–0xAE10 and 0xB000–0xBA00 zero gaps split it, and offsets cross-reference per region only.</li>
+  </ul>
+</section>
+
+<section id="tests">
+  <h2>Tests that pin it</h2>
+  <p>Re-run first when touching the image or these claims:</p>
+  <pre class="pseudo">python analysis/decode_fw.py     # regenerates out/fw_decode.txt + fw_strings.txt
+python analysis/probe_pe.py      # regenerates out/rcdata_4000.bin (pin-enforced)</pre>
+  <p>Fast assertions inside decode_fw: image size 0x7E000; SP 0x200076F8; tail bytes ...55 55 aa aa; sole 55 55 AA AA byte-run at 0x7DFFC; no utf16 strings; checksum candidates never appear anywhere.</p>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="binary-evidence.html">Binary evidence</a> — the pin, the exe census, the probe that extracts this image.</li>
+    <li><a href="fw-tables.html">Keymap &amp; LED tables</a> — the layout/LUT band decoded from this image; key ids come from its 61-key universe.</li>
+    <li><a href="isp-protocol.html">ISP protocol — the updater's feature-report protocol over HID</a> — commands, want-gates and the pw frame; its version/sum interplay is what the patched image must satisfy.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

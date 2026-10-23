@@ -1,0 +1,16 @@
+# Normalise text so the repository is checkout-agnostic.
+* text=auto eol=lf
+
+*.py     text eol=lf
+*.md     text eol=lf
+*.html   text eol=lf
+*.txt    text eol=lf
+*.yml    text eol=lf
+*.json   text eol=lf
+
+# Never diff or normalise binaries.
+*.exe    binary
+*.bin    binary
+*.zip    binary
+*.png    binary
+*.ico    binary
