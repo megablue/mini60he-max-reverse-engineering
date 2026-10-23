@@ -71,6 +71,7 @@ docs/PLAN.html          phases, fences, and the first-patch write-up
 HANDOFF.md              session state: what was just done, what is next
 AGENTS.html             process rules for agents working in this tree (AGENTS.md is a pointer)
 LICENSE, NOTICE         MIT for this work; the vendor binary in bin/ is not covered
+requirements.txt        pefile + capstone, the only two dependencies
 ```
 
 `analysis/out/` is deliberately untracked: it is where the extracted firmware, the
@@ -96,6 +97,9 @@ transcripts and the built installers land, and every one of them is reproducible
 | `mkflasher.py` | generic wrapper: any `0x7E000` image -> patched updater + manifest |
 | `isp_*.py` | ISP protocol: frame format, `AA 55` command table, password payload, upload flow, gates |
 
+`readw.py`, `find_str.py`, `isp_chk*.py` and `isp_pw7b/c/d.py` are scratch probes kept as the
+trail to those findings - no docstring, no pins, superseded by the reported ones.
+
 `analysis/out/` holds the transcripts these print (`fw_keys.txt`, `fw_sensor.txt`, `fw_bake3.txt`, …)
 plus the extracted resources (`rcdata_4000.bin`, small RCDATA ids), the ISP transcripts
 (`isp_walk.txt`, `isp_gate.txt`, `pw7_out.txt`) and the built binaries.
@@ -106,7 +110,7 @@ Every script is standalone: `python analysis/fw_keys.py`.
 ### First run after cloning
 
 ```powershell
-pip install pefile capstone
+pip install -r requirements.txt
 python analysis/probe_pe.py     # checks the pinned exe, extracts RCDATA 4000 -> analysis/out/
 ```
 
