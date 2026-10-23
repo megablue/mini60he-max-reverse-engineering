@@ -1,0 +1,49 @@
+name: verify
+
+# The scripts are deterministic and SHA-256 pinned, so a runner either
+# reproduces the documented artifacts from bin/ or the repository has drifted.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reproduce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Extract the pinned image and re-run the core probes
+        run: |
+          python analysis/probe_pe.py
+          python analysis/decode_fw.py
+          python analysis/fw_keys.py
+          python analysis/fw_sensor.py
+          python analysis/fw_patch.py
+          python analysis/isp_gate.py
+          python analysis/probe_radio.py
+          python analysis/probe_cert.py
+
+      - name: Confirm the extracted image matches the pin
+        run: |
+          python - <<'PY'
+          import hashlib, pathlib
+          p = pathlib.Path("analysis/out/rcdata_4000.bin")
+          got = hashlib.sha256(p.read_bytes()).hexdigest().upper()
+          want = "06A1A47432A6CA7EC060103378E2D984A46F9AFA98F19FCCD99219EAEA4A88E0"
+          print("image", got)
+          assert got == want, "firmware image does not match the pin"
+          PY
