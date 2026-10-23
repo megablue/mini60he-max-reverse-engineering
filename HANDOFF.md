@@ -270,8 +270,10 @@ level-2-first ladder are in [A second Fn key (Fn2)](docs/features/fn2.html).
 
 - The old misspelled sibling folder was removed on 2026-10-22; only this
   workspace's copy of the binary remains (hash still matches the pin).
-- The repository was initialized on 2026-10-22 (branch `main`, local only,
-  nothing pushed); `analysis/out/` is ignored and the vendor exe is committed.
+- The repository was initialized on 2026-10-22 (branch `main`) and published
+  publicly as
+  [megablue/mini60he-max-reverse-engineering](https://github.com/megablue/mini60he-max-reverse-engineering)
+  on 2026-10-23; `analysis/out/` is ignored and the vendor exe is committed.
 - PE strings are empty (ProductName/Company blank) while FileVersion reports
   2.1.2.13 — a likely first RE lead for what kind of build produced this app.
 - Whether the physical board carries a 2.4G/Bluetooth SoC cannot be decided
@@ -293,7 +295,15 @@ level-2-first ladder are in [A second Fn key (Fn2)](docs/features/fn2.html).
   the string), but the tool's own branding still splits between SONiX (About
   box, copyright) and `EVision 幻彩` (UI string).
 
-## Local-only state (not on the remote)
+## Published state
 
-The repository is local-only: there is no remote, so nothing has been pushed
-anywhere, and there is no clone or tooling.
+The repository is public at
+<https://github.com/megablue/mini60he-max-reverse-engineering> (pushed
+2026-10-23, `main`). The first push ran the verify workflow for the first time:
+it failed because `probe_radio.py` reads `fw_code.txt`, which the workflow never
+generated, and went green after
+[`bf1b40d`](https://github.com/megablue/mini60he-max-reverse-engineering/commit/bf1b40d)
+added `analysis/fw_code.py` to the sequence. Before publishing, the README
+gained the flashing warning the earlier "revisit if pushed" note asked for: no
+readback, the settings pages are erased by a write, an interrupted write has no
+proven recovery.
