@@ -54,7 +54,8 @@ Everything here is **file analysis**: no script opens a HID device, the updater 
 | Current bake | `analysis/out/MINI60HE_max_bake3.exe` - **built, not yet flashed** |
 | Side finding | an ISP write blanks the NVM settings pages, so app-side remaps and macros must be re-entered after every flash |
 
-What works today: remapping any physical key to any usage, adding Fn-layer chords, changing
+What the evidence supports: remapping a key through the catalog (the app does it today;
+the image edit is built), adding Fn-layer chords (proven on hardware), changing
 per-key actuation tuning, retuning LED tables. What does not: reading flash back from the device
 (the protocol has no dump command), and anything wireless - the radio is not in this image.
 

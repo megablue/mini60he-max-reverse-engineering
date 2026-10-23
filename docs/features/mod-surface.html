@@ -18,7 +18,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <body>
 <article class="map page">
 <h1>Modification surface — where a patch goes in RCDATA 4000, and what gates it</h1>
-<p class="status">Status: phase-5 inventory (data hooks, LED value tables, code constants and the four gates pinned byte-exactly, plus a remap planner that plans byte edits) and the Fn action enum decoded to a built four-byte bake (<code>out/fw_volplus.bin</code>, nothing flashed) · Read when: choosing a modification, planning a specific key remap, computing a patch offset, decoding an Fn output byte, or checking what a byte edit would break</p>
+<p class="status">Status: phase-5 inventory (data hooks, LED value tables, code constants and the four gates pinned byte-exactly, plus a remap planner that plans byte edits), the Fn action enum decoded, and one write on hardware: the four-byte bake was flashed 2026-10-22 and showed that the key catalog at <code>0x9600</code>, not the <code>0x16DD8</code> usage table, is the output path; the corrected 12-byte catalog bake is built (<code>MINI60HE_max_bake3.exe</code>), not flashed · Read when: choosing a modification, planning a specific key remap, computing a patch offset, decoding an Fn output byte, or checking what a byte edit would break</p>
 
 <section id="what-it-is">
   <h2>What it is</h2>
@@ -100,18 +100,37 @@ BA    EA 00   Volume Down   table
 </section>
 
 <section id="fn-bake">
-  <h2>Fn + Right Arrow — the four-byte bake</h2>
-  <p>The Fn <em>state</em> is keyed on the usage value <code>0xAF</code>, not on a key id: on the owner's keyboard the key at the old <code>RAlt</code> position produces <code>Fn+1 = F1</code> today, only because an app remap put <code>0xAF</code> on it. The usage table at <code>0x16DDA</code> is one <code>(id, usage)</code> pair per key, so moving a value between two ids moves the role between two physical keys — and the owner's intended keys are exactly the two that now hold the swapped pair:</p>
-  <pre class="verbatim" data-why="the four bytes written by analysis/fw_volpatch.py">
-0x16C7E  4C -> 4F   Fn map row 32: Insert becomes Right Arrow
-0x16C7F  49 -> B9   Fn map row 32: Delete becomes Volume Up
-0x16E83  E6 -> AF   id 0x54 (old RAlt) becomes Fn
-0x16E85  AF -> 4F   id 0x55 (stock Fn) becomes Right Arrow
+  <h2>Fn + Right Arrow — from four bytes to the catalog bake</h2>
+  <p>The Fn <em>state</em> is keyed on the usage value <code>0xAF</code>, not on a key id: on the owner's keyboard the key at the old <code>RAlt</code> position produces <code>Fn+1 = F1</code> only because an app remap put <code>0xAF</code> on it. The first bake assumed the usage table at <code>0x16DD8</code> also decided what the key <em>sends</em>. It does not, and the 2026-10-22 flash settled that on the wire.</p>
+  <h3>The four bytes that were written</h3>
+  <p>The four-byte image (<code>out/fw_volplus.bin</code>, sha256 <code>ac46b5aa…</code>) was written on 2026-10-22:</p>
+  <pre class="verbatim" data-why="the four bytes written by analysis/fw_volpatch.py, flashed 2026-10-22">
+0x16C7E  4C -> 4F   Fn map row 32: Insert becomes Right Arrow   (live)
+0x16C7F  49 -> B9   Fn map row 32: Delete becomes Volume Up     (live)
+0x16E83  E6 -> AF   id 0x54 (old RAlt) — usage table           (inert)
+0x16E85  AF -> 4F   id 0x55 (stock Fn) — usage table           (inert)
+</pre>
+  <p>The two Fn-map bytes work: after re-entering <code>id 0x54 → 0xAF</code> and <code>id 0x55 → 0x4F</code> in the companion app, <code>Fn</code> + old Fn key produced Volume Up. The two usage-table bytes changed nothing — old Fn stayed Fn and old <code>RAlt</code> stayed right Alt. That table feeds only the usage→id reverse lookup at <code>0x327C</code>; what a key sends is read from the per-key catalog at <code>0x9600 + id*4</code> (usage in byte 2, loader <code>0x5950</code>).</p>
+  <h3>The catalog bake (built, not flashed)</h3>
+  <p><code>bake3</code> puts the same two roles in the catalog — which is what the app's own remap writes — and repeats the pair in the usage table so the reverse lookup stays consistent:</p>
+  <pre class="verbatim" data-why="the 12 bytes of analysis/out/MINI60HE_max_bake3.exe, built and not flashed">
+0x9752  E6 -> AF   catalog id 0x54 (old RAlt) becomes Fn
+0x9756  AF -> 4F   catalog id 0x55 (stock Fn) becomes Right Arrow
+0x972E  E5 -> 52   catalog id 0x4B (right Shift)  becomes Up
+0x975A  65 -> 50   catalog id 0x56 (Menu)         becomes Left
+0x975E  E4 -> 51   catalog id 0x57 (right Ctrl)   becomes Down
+0x16E83 E6 -> AF   usage pair 0x54, keeps the reverse lookup consistent
+0x16E85 AF -> 4F   usage pair 0x55
+0x16E71 E5 -> 52   usage pair 0x4B
+0x16E87 65 -> 50   usage pair 0x56
+0x16E89 E4 -> 51   usage pair 0x57
+0x16C7E 4C -> 4F   Fn map row 32 input
+0x16C7F 49 -> B9   Fn map row 32 output
 </pre>
   <ul>
-    <li><strong>Net behaviour.</strong> Old <code>RAlt</code> key = Fn; old Fn key = Right Arrow; Fn + Right Arrow = Volume Up (<code>0xB9</code> → consumer <code>0x00E9</code>). <code>RAlt</code> and the factory Fn position are gone — that is the trade the owner asked for.</li>
-    <li><strong>Independent of the app.</strong> Because both usages are in the table, no NVM remap has to be active; re-flashing the whole image would otherwise wipe those pages. Ids keep their scan positions, so per-key actuation records stay on the same physical keys.</li>
-    <li><strong>Still in the gates.</strong> Four bytes, no length change, all at or above <code>0x16A96</code>; the version word below it and the RCDATA size are untouched. <code>analysis/fw_volpatch.py --chord-only</code> builds the two-byte variant for the case where the app remap is guaranteed to stay.</li>
+    <li><strong>Net behaviour.</strong> Old <code>RAlt</code> = Fn, old Fn = Right Arrow, Fn + Right Arrow = Volume Up (<code>0xB9</code> → consumer <code>0x00E9</code>); right Shift/Menu/right Ctrl = Up/Left/Down. <code>RAlt</code>, the factory Fn position and those three keys stop being themselves — the trade the owner asked for.</li>
+    <li><strong>Independent of the app.</strong> The roles are in the catalog, so no NVM remap has to be active; a reflash would otherwise wipe the settings pages that hold the app's remap. Ids keep their scan positions, so per-key actuation records stay on the same physical keys.</li>
+    <li><strong>Still in the gates.</strong> Twelve bytes, no length change, all at or above <code>0x16A96</code>; the version word below it and the RCDATA size are untouched. Built by <code>analysis/fw_bake3.py</code>, wrapped by <code>analysis/mkflasher.py</code> (image <code>617eef7f…</code>, exe <code>774bb728…</code>). Not flashed: the catalog path is inferred from the app's own remap, not yet from an image write.</li>
   </ul>
   <p>The same dispatcher that serves this row has a fourth, unreachable layer — the starting point for <a href="fn2.html">a second Fn key</a>.</p>
 </section>
@@ -164,7 +183,7 @@ BA    EA 00   Volume Down   table
     <li>The <code>0xB000</code>/<code>0xB600</code> NVM record layout, and whether an in-image default survives the first settings save.</li>
     <li>Cell-record semantics at <code>0x174B9</code>.</li>
     <li>Whether pages are encrypted before write — the <code>Set Encryption Algorithm</code> command exists; its default state is unknown.</li>
-    <li>Everything is static: no modification has been built, flashed or observed on hardware.</li>
+    <li>Only the four-byte image has been on hardware. The role swap has been seen through the app's settings-page remap, not through an image edit, so the catalog bake is still a prediction; every LED change is unflashed too.</li>
   </ul>
 </section>
 

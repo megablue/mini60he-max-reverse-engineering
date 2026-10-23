@@ -77,10 +77,21 @@ exists here only once something was observed and verified.</p>
 </section>
 <section id="identity">
 <h2>Identity</h2>
-<p>Everything below is read out of the pinned binary and the firmware image it carries; none of it has been observed on hardware yet, so these are the firmware&#39;s claims about itself, not bench measurements.</p>
+<p>Most of what follows is read out of the pinned binary and the firmware image it carries — the firmware's claims about itself. Where a claim has also been measured on the keyboard, it says so; the measured list is kept together in <a href="#hardware">Observed on hardware</a>, so the two kinds of evidence never blur.</p>
 <ul>
-<li>The keyboard is driven as a HID keyboard, and the updater identifies its board by vendor <code>0x0C45</code> / product <code>0x80A1</code>. The firmware carries the product string <code>MINI60HE MAX</code>.</li>
+<li>The keyboard is driven as a HID keyboard, and the updater identifies its board by vendor <code>0x0C45</code> / product <code>0x80A1</code> (bench-confirmed: the updater matched this board on 2026-10-22 and completed a write). The firmware carries the product string <code>MINI60HE MAX</code>.</li>
 <li>The controller is a SONiX SN34F280 on the <code>108A</code> board. The updater also knows other SN8F/SN32F boards, which is why its chip list names parts this keyboard does not use.</li>
+</ul>
+</section>
+<section id="hardware">
+<h2>Observed on hardware</h2>
+<p>Measured on the keyboard itself, not read from the image. Most of it comes from one write on 2026-10-22, performed by the owner with the vendor updater; no analysis script has ever opened the device.</p>
+<ul>
+<li><strong>A modified image can be written and boots.</strong> The four-byte image flashed cleanly, the version check accepted it, the keyboard came back up and typing was unaffected. Interrupted-write recovery was not exercised.</li>
+<li><strong>An ISP write empties the settings pages.</strong> The owner&#39;s macro and CapsLock remap disappeared and had to be re-entered: the settings pages sit inside the written range and are not preserved.</li>
+<li><strong>The Fn layer behaves as described.</strong> <code>Fn+1</code> = F1, <code>Fn+W</code> = Bluetooth host 2, <code>Fn+F7/F8/F9/F10</code> = previous / play-pause / next / mute, <code>Fn+F12</code> = volume up.</li>
+<li><strong>The image&#39;s id→usage table is not the output path.</strong> A flashed swap of two roles there changed nothing: the old Fn key still acted as Fn and the old <code>RAlt</code> stayed right Alt. Key output is taken from the per-key catalog at <code>0x9600</code>, which is why that edit never reached the wire.</li>
+<li><strong>The Fn-map edit and the app&#39;s remap do work.</strong> Re-entering the same two roles in the companion app (which writes the settings pages) moved the keys, and the baked Fn row then produced volume up from <code>Fn</code> + Right Arrow. The Fn row itself is therefore live on hardware; the catalog bake that makes the roles independent of the app is built but not yet written.</li>
 </ul>
 </section>
 <section id="typing">
@@ -159,7 +170,7 @@ they appear as observed behavior above and as tables in the feature pages.</p>
 <li>Before writing, it compares the version word in the firmware file with the version bytes the device reports and refuses to continue on a mismatch (<code>Firmware Version is not for this chip!!</code>).</li>
 <li>It displays a 16-bit checksum of the loaded file; the hex-file and bin-file paths have separate checksum displays, and the firmware image carries no checksum field of its own.</li>
 <li>It has no command that reads back flash contents. It can program, erase and verify, but it cannot dump a stock image, so a backup has to be the factory image extracted from the updater itself — and the updater cannot prove the keyboard matches that copy.</li>
-<li>Flashing is gated in this project (phase 6, user-approved only): nothing described here has been written to a device.</li>
+<li>Flashing is gated in this project (phase 6, user-approved only). One four-byte image has been written, on 2026-10-22, through the vendor updater; the corrected catalog bake has not been written. The write results are in <a href="#hardware">Observed on hardware</a>.</li>
 </ul>
 </section>
 <section id="related">

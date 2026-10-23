@@ -9,9 +9,15 @@ disagrees with the code, the code is right. `AGENTS.md` is the process doc,
 This file is the volatile one — it exists so a new session knows *where things
 stand*, not *how they work*.
 
-As of no git repo — 2026-10-22.
+As of 2026-10-24.
 
 ## State
+
+One write has happened: the four-byte image was flashed on 2026-10-22. The device
+is fine, its settings pages were wiped, the Fn-row byte is live and the two
+usage-table bytes changed nothing. The corrected catalog bake (`bake3`) is built
+and not flashed. Details: "First flash" below and
+[Plan](docs/PLAN.html#first-patch).
 
 Phases 1–2 progressed on disk (2026-10-22): `analysis/probe_pe.py` and
 `analysis/decode_fw.py` regenerate every artifact in `analysis/out/` from the
@@ -99,15 +105,18 @@ previously recorded thumbprint (the old `9CCFE9B7…` matched nothing) and the
 identity no longer rests on the file name alone, and the duplicate sibling
 folder no longer exists.
 
-Risk & wireless check recorded (2026-10-24). Nothing in this project has ever
-touched the device, so current risk is zero. For phase 6 the exposure is the
-write step only: version, checksum and per-variant size guards exist, but the
-updater has **no flash-read command**
+Risk & wireless check recorded (2026-10-24; corrected after the first write). No
+analysis script has ever touched the device; the only device contact in this
+project is the owner's own flash on 2026-10-22. That write makes the exposure
+concrete: it succeeded, but it emptied the settings pages and there is still no
+recovery path. For the next write the exposure is the write step only: version,
+checksum and per-variant size guards exist, but the updater has **no flash-read
+command**
 ([ISP protocol](docs/features/isp-protocol.html), "No flash-read command"), so a
 device dump is impossible and an interrupted write is the main brick scenario;
 the bootloader sits outside the 0x7E000 app span, but recovery is unverified.
-The first flash should be the unmodified factory image on a second unit, after
-a recovery path is demonstrated. [Firmware image](docs/features/fw-image.html)
+The rule for the next write is the unmodified factory image on a second unit
+first, after a recovery path is demonstrated. [Firmware image](docs/features/fw-image.html)
 now also records the negative radio evidence, regenerable via
 `analysis/probe_radio.py` (`out/probe_radio.txt`): no wireless vocabulary, no
 serial bus controller, one HID interface — a 2.4G/BT feature would be a
@@ -128,8 +137,9 @@ is live: `0x1456E` calls the dispatcher `0x2FF0`, `0x1457A` the mode setter
 Phase 5 modification surface inventoried (2026-10-24). `analysis/fw_patch.py`
 (`out/fw_patch.txt`) turns every candidate mod into an offset, a unit and its
 owning code; the new [Modification surface](docs/features/mod-surface.html)
-page is the entry point. Three remap hooks (usage table `0x16DD8`, four Fn
-overlays, scan grid `0x16A96`), actuation defaults `0x8400`/`0x8500`
+page is the entry point. Three remap hooks (catalog `0x9600` — corrected from the
+usage table `0x16DD8` after the first flash — four Fn overlays, scan grid
+`0x16A96`), actuation defaults `0x8400`/`0x8500`
 (112 x u16 each, uniform — 0x960 / 0x640), the `0x9600` catalog (102 kind-2 +
 10 kind-3 records), LED palette `0x17668` / hue ramp `0x17837` / preset run
 `0x17A83`, and four code constants (hysteresis `0xC` @0x3764, commit delta
@@ -160,31 +170,44 @@ Volume Down. Rows 11/12 already map `F11/F12` to those, which makes `Fn+F12` a
 free proof of the chain on stock firmware. The user's chord needs no code: of
 the 51 Fn rows only 13 are unreachable (rows 1–12 = `F1..F12`, a 60% has no
 F-row; row 32 = Insert→Delete, no Insert key), so row 32 becomes Right Arrow →
-Volume Up, i.e. `0x16C7E: 4C 49 -> 4F B9`. That alone still depended on the app
-remap keeping Right Arrow on the key, and a flash erases the NVM pages
-`0xB000`/`0xB600` where the app's remaps live — so the bake now moves the two
-roles in the usage table as well: `0x16E83: E6 -> AF` (id `0x54`, the old RAlt
-position, becomes Fn) and `0x16E85: AF -> 4F` (id `0x55`, the stock Fn position,
-becomes Right Arrow). Fn-held is keyed on the usage value `0xAF`, proved on
-hardware: the key at the old RAlt position already yields `Fn+1` = F1.
-[Plan](docs/PLAN.html#first-patch) carries the test ladder and gates;
-`analysis/fw_volpatch.py` builds `out/fw_volplus.bin` — exactly four bytes
-differ (`0x16C7E`, `0x16C7F`, `0x16E83`, `0x16E85`), length and the version words
-are untouched (sha256 `ac46b5aa…`), and `--chord-only` still builds the two-byte
-variant. Cost: Right Alt and the factory Fn position no longer exist as such;
-per-key settings stay put because ids keep their scan positions.
+Volume Up, i.e. `0x16C7E: 4C 49 -> 4F B9`. That alone still depended on the app remap keeping Right Arrow on the key. Fn-held
+is keyed on the usage value `0xAF`, proved on hardware: the key at the old RAlt
+position already yields `Fn+1` = F1. The first attempt therefore moved the two
+roles in the usage table as well (`0x16E83: E6 -> AF` for id `0x54`,
+`0x16E85: AF -> 4F` for id `0x55`) — and that is the part the flash disproved:
+neither key moved, because output is read from the catalog, not that table. The
+corrected bake (`bake3`) carries the same pair at the catalog offsets
+`0x9752`/`0x9756`, keeps the usage table consistent for the reverse lookup, and
+adds the Fn row; it is built and not flashed. `analysis/fw_volpatch.py` still
+builds the four-byte image, `analysis/fw_bake3.py` the catalog one.
+[Plan](docs/PLAN.html#first-patch) carries the measured results, ladder and gates;
+the four-byte image differs in exactly four bytes (sha256 `ac46b5aa…`) and
+`bake3` in twelve (image `617eef7f…`, wrapped exe `774bb728…`). Cost: Right Alt
+and the factory Fn position no longer exist as such, and `bake3` also parks
+Up/Left/Down on right Shift/Menu/right Ctrl; per-key settings stay put because
+ids keep their scan positions.
 
-Flash go recorded (2026-10-24). The user chose the second-unit path, so the run
-is planned but nothing has been written to a device. Two artifacts are staged
-side by side: `analysis/out/fw_stock.bin` (factory `RCDATA 4000`, sha256
-`06a1a474…`) to prove the write path first, and `analysis/out/fw_volplus.bin`
-(the bake, `ac46b5aa…`) to try second. New fact from the tool's file dialog:
-the filter is `*.hex,*.bin` and the handler at `0x423B90` matches `L".hex"` then
-`L".bin"` and stores 1/2 at dialog `+0x428`; the `.bin` branch memsets the 1 MiB
-firmware buffer (fill `0xFF` for this chip family) and reads the file into
-`[dialog+0x1E44]` — the same pointer the bundled-RCDATA loader uses and the
-upload flow reads — so a raw `.bin` reaches the writer and no Intel-HEX wrapper
-is needed. Steps, abort conditions and the two remaining inferences (write span
+First flash (2026-10-22; replaces the earlier "planned, not done" entry). The
+owner flashed the four-byte image on the daily driver —
+`analysis/out/MINI60HE_max_bake.exe`, the vendor installer with only `RCDATA
+4000` replaced, started from the tool's own Start button. It completed, the
+keyboard rebooted and typed. Measured: the version gate accepted the image (no
+mismatch dialog); the app's macro and CapsLock remap were gone, so the NVM pages
+`0xB000`/`0xB600` were emptied; the usage-table bytes changed nothing on the
+wire — output is read from the catalog at `0x9600 + id*4` (loader `0x5950`),
+and `0x16DD8` only feeds the reverse lookup `0x327C`; the Fn-row byte is live —
+after re-entering `id 0x54 -> 0xAF` and `id 0x55 -> 0x4F` in the app, `Fn` + old
+Fn key produced Volume Up. Interrupted-write recovery is still untested, and
+nothing has been written since.
+
+Next write (catalog bake, still gated). `bake3` is built, not flashed. Its
+container facts: the dialog filter is `*.hex,*.bin` and the handler at `0x423B90`
+matches `L".hex"` then `L".bin"` and stores 1/2 at dialog `+0x428`; the `.bin`
+branch memsets the 1 MiB firmware buffer (fill `0xFF` for this chip family) and
+reads the file into `[dialog+0x1E44]` — the same pointer the bundled-RCDATA
+loader uses and the upload flow reads — so a raw `.bin` reaches the writer and no
+Intel-HEX wrapper is needed. The 2026-10-22 run used the wrapped exe rather than
+this path. Steps, abort conditions and the two remaining inferences (write span
 derived from the image rather than traced to the loop counter; recovery from an
 interrupted write still unproven) live in
 [the runbook](docs/PLAN.html#flash-runbook).
@@ -222,9 +245,8 @@ level-2-first ladder are in [A second Fn key (Fn2)](docs/features/fn2.html).
 
 - The old misspelled sibling folder was removed on 2026-10-22; only this
   workspace's copy of the binary remains (hash still matches the pin).
-- `git init` deliberately deferred (user chose this, 2026-10-22): commit
-  rules in `AGENTS.md` stay dormant until then; when a repo is initialized,
-  this scaffold is the first commit.
+- The repository was initialized on 2026-10-22 (branch `main`, local only,
+  nothing pushed); `analysis/out/` is ignored and the vendor exe is committed.
 - PE strings are empty (ProductName/Company blank) while FileVersion reports
   2.1.2.13 — a likely first RE lead for what kind of build produced this app.
 - Whether the physical board carries a 2.4G/Bluetooth SoC cannot be decided
@@ -237,15 +259,16 @@ level-2-first ladder are in [A second Fn key (Fn2)](docs/features/fn2.html).
 
 ## Known gaps (volatile; the durable traps live in the feature pages)
 
-- Behavior in `docs/SPEC.md` is sourced from static analysis except where a row
-  says it was keyboard-verified (the Fn/volume enum, the OS-mode chords and the
-  wireless dead window are hardware facts now); the companion app's own
-  key-mapping/lighting UI is still not decoded.
+- Behavior in `docs/SPEC.md` is sourced from static analysis except for
+  [Observed on hardware](docs/SPEC.html#hardware) (the 2026-10-22 write, the NVM
+  wipe, the Fn/volume enum, and the Fn table not being the output path); the
+  wireless dead window and the OS-mode chords are hardware facts too. The
+  companion app's own key-mapping/lighting UI is still not decoded.
 - The product name no longer rests on the file name alone (the firmware carries
   the string), but the tool's own branding still splits between SONiX (About
   box, copyright) and `EVision 幻彩` (UI string).
 
 ## Local-only state (not on the remote)
 
-No repo exists, so every file is local-only — nothing has been pushed
+The repository is local-only: there is no remote, so nothing has been pushed
 anywhere, and there is no clone or tooling.
