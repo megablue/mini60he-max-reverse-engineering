@@ -202,6 +202,22 @@ falsifiable hypothesis per write.
 [Rebuild or patch](docs/features/rebuild-vs-patch.html) holds the measurements and
 the constraints; [Plan](docs/PLAN.html#rebuild-or-patch) records the decision.
 
+The second-Fn question was answered on 2026-10-24 without touching hardware, and
+it is the first design that needs new code. A second Fn-like modifier is
+realistic, but not by table edit: the Fn map is selected by the persistent OS-mode
+byte `0x200000AE`, not by which modifier is held. What makes it cheap is what is
+already in the image — the dispatcher `0x2FF0` loads all four 51-row layer bases
+up front and has a branch for mode 2 (`0x303E` → `0x16D0C`), while `0x2AE4` writes
+only 0/1/3, so layer 2 is a wired-but-unreachable second map. The sketched design
+is a sentinel usage on the Fn2 key plus a momentary mode override (save the byte,
+write 2 while held, restore on release): ~60–120 bytes of Thumb, one RAM byte, no
+relocation, with a benign failure mode if a release is missed. The one unresolved
+gate is how a physical Fn press sets `0x20000090` — the only immediate-offset
+writer found is the macro player's group-`0x30` step, which points at a generic
+computed-base store; reading the `[base+4]==0xAF` branch at `0x147C4` and the
+clear at `0x233C` should settle it in half a day to a day. Costs and the
+level-2-first ladder are in [A second Fn key (Fn2)](docs/features/fn2.html).
+
 ## Open threads
 
 - The old misspelled sibling folder was removed on 2026-10-22; only this

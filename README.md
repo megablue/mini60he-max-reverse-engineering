@@ -268,6 +268,7 @@ The feature map is the entry point: **`docs/features/index.html`**.
 | `key-pipeline.html` | scan IRQ -> position map -> usage -> Fn overlay -> mode byte, actuation |
 | `mod-surface.html` | choosing a mod, computing an offset, the three remap hooks, the action enum |
 | `rebuild-vs-patch.html` | whether a rebuild is possible, and how far a hook into blank flash reaches |
+| `fn2.html` | a second Fn-like modifier: the dead layer 2, the momentary design, its gate and costs |
 
 `docs/SPEC.html` states behaviour (typing, actuation, lighting, settings, updating);
 `docs/PLAN.html` holds the phases, the fences and the first-patch recipe.

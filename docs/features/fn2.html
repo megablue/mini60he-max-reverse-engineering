@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="megablue">
+<meta name="generator" content="opencode-feature-map">
+<title>A second Fn key (Fn2) — feasibility of a second Fn map in RCDATA 4000</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>A second Fn key (Fn2) — feasibility of a second Fn map in RCDATA 4000</h1>
+<p class="status">Status: feasibility study (2026-10-22, static) — realistic as a level-3 code hook in 2–4 days plus 2–3 flash cycles; layer 2 already exists and is wired into the dispatcher but unreachable; the Fn flag writer is the one unresolved gate · Read when: asking for a second modifier key with its own map, deciding between momentary Fn2 and a layer toggle, or budgeting the first patch that adds code</p>
+
+<section id="what-it-is">
+  <h2>What it is</h2>
+  <p>The question: can the board have a <strong>second Fn-like modifier</strong> — a key that, while held, makes other keys resolve through <strong>a different 51-row table</strong> than Fn uses? </p>
+  <p><strong>Verdict: yes, and it is smaller than it sounds — but it is the first patch that must add code.</strong> There is no table-only route, because the Fn map is chosen by a persistent OS-mode byte (<code>0x200000AE</code>), not by which modifier is held. What makes it cheap is that the second map, the table-selection code and the blank flash for a hook all already exist.</p>
+</section>
+
+<section id="already-there">
+  <h2>What is already there (fact)</h2>
+  <p>The dispatcher <code>0x2FF0</code> loads all four layer bases up front and has a branch for every mode value, including the one nothing can reach:</p>
+<pre class="pseudo">2FF4  ldr  r4,[pc]        ; r4 = 0x20000088   keyboard object
+2FF6  ldr  r5,[pc]        ; r5 = 0x16C3E      layer 0
+2FF8  ldr  r6,[pc]        ; r6 = 0x16CA6      layer 1
+2FFC  ldr  r7,[pc]        ; r7 = 0x16D0C      layer 2
+2FFE  ldr  r8,[pc]        ; r8 = 0x16D72      layer 3
+3006  ldrb r0,[r4,#8]     ; Fn-held flag (0x20000090)
+3008  beq  0x30A2         ; no Fn: restore path
+300A  bl   0x7378         ; row = search(layer0.byte0 == usage), 0xFF = none
+3016  ldrb r1,[r4,#0x26]  ; OS mode byte
+301C  cmp  r1,#1  3020 cmp r1,#2  3024 cmp r1,#3
+302A  out = layer0[row*2+1] -> [r4,#4]
+3034  out = layer1[row*2+1] -> [r4,#4]
+303E  out = layer2[row*2+1] -> [r4,#4]   ; mode 2: reachable, never selected
+3048  out = layer3[row*2+1] -> [r4,#4]</pre>
+  <ul>
+    <li><strong>Layer 2 is already wired and dead.</strong> <code>0x303E</code> selects <code>0x16D0C</code> when the mode byte is 2, and nothing writes 2 — <code>0x2AE4</code> writes only 0/1/3. That is a free 51-row second map, already the right shape; its byte 1 column is currently identical to the Mac layer.</li>
+    <li><strong>One input mapping serves every layer.</strong> The row index always comes from layer 0's byte 0, so an Fn2 table only needs its byte 1 column edited — no new input map, no relocation, no stride change.</li>
+    <li><strong>Nothing caches the mode.</strong> The byte is re-read on every event at <code>0x3016</code>, so a momentary change takes effect on the next key event and reverts cleanly.</li>
+  </ul>
+</section>
+
+<section id="design">
+  <h2>The smallest design: a momentary mode override</h2>
+  <p>Rather than adding a second flag and a fifth table, borrow the unused mode value while the key is held:</p>
+  <ol>
+    <li><strong>Sentinel usage.</strong> Give the Fn2 key a usage value in its catalog record that the host ignores — the trick that already makes Fn work (<code>cmp r0,#0xaf</code> at <code>0x147B6</code>). The value must also exist in the pair table on a spare id, so the <code>usage→id</code> lookup at <code>0x327C</code> still resolves.</li>
+    <li><strong>Momentary mode write.</strong> Hook the key-event path: sentinel pressed → save the current mode byte to a spare RAM byte and write <code>2</code>; sentinel released → restore the saved byte.</li>
+    <li><strong>Fill layer 2.</strong> Edit its byte 1 rows at <code>0x16D0C+</code>, up to 51 actions.</li>
+  </ol>
+  <p>No dispatcher edit, no new table, no relocation: roughly <strong>60–120 bytes</strong> of Thumb in blank flash, one RAM byte and one key role. The failure mode is benign: a missed release leaves the mode at 2, so Fn keeps returning the Fn2 map until the key is pressed again or the board resets — visible, and recoverable without a reflash.</p>
+</section>
+
+<section id="gate">
+  <h2>The gate: how a physical Fn press sets its flag</h2>
+  <p>The dispatcher's gate is a plain zero/nonzero test on <code>0x20000090</code>, but <strong>its writer is not pinned</strong>. In the main code the only literal references are a read at <code>0x10D8</code> and a clear at <code>0x233C</code>, and the only immediate-offset store found is the macro player's group-<code>0x30</code> step (<code>0x53D4</code>/<code>0x53D8</code>). That pattern points at a generic modifier-group store through a computed base, which an immediate-offset hunt would miss.</p>
+  <p>Resolve it by reading the <code>[base+4]==0xAF</code> branch at <code>0x147C4</code> and the clear at <code>0x233C</code> — half a day to a day. Two outcomes:</p>
+  <ul>
+    <li><strong>Fn is one entry in a generic group mechanism</strong> with a free group code → Fn2 becomes simpler than the design above, possibly a data edit plus a group assignment.</li>
+    <li><strong>Fn is bespoke</strong> → keep the design above, and detect Fn2 at the actuation state instead (<code>0x32AC</code>; per-key actuated bit 15 of <code>0x200031AE</code>), which gives explicit press and release at a slightly hotter code site.</li>
+  </ul>
+</section>
+
+<section id="limits">
+  <h2>Limits and costs</h2>
+  <ul>
+    <li><strong>Same row ceiling as Fn.</strong> The lookup only resolves usages present in layer 0's byte 0, so app-remapped keys fall out of the Fn2 path exactly as they fall out of Fn today. Fn2 can only map the 51 stock usages.</li>
+    <li><strong>Mode 2 is visible while the key is held.</strong> Only the <code>base+0x26</code> addressing form is confirmed; absolute <code>movw/movt</code> readers of <code>0x200000AE</code> were not ruled out, so any code keyed on the OS mode may misbehave during the hold.</li>
+    <li><strong>Precedence is a design decision, not a detail:</strong> Fn2+Fn, Fn2+S/D/A (the Mac/Windows/Android combos, which overwrite the mode byte), and Fn2 held across a wireless dead window all need a rule before the first write.</li>
+    <li><strong>Every iteration is a flash</strong> that wipes the NVM settings, with no readback and no debugger.</li>
+    <li><strong>No app-side route.</strong> The config app cannot express a second modifier and the NVM records have no slot for one, so Fn2 exists only in firmware.</li>
+    <li><strong>Cheap fallback</strong> if momentary semantics do not matter: a key that toggles the mode byte 0↔2, so plain Fn switches maps. Less code, but global sticky state that fights the Mac/Android modes.</li>
+  </ul>
+  <p>Ladder, following the level-2-first rule: prove the table swap with a data-only change first (point Windows mode at layer 1 and confirm Fn outputs change), then add the sentinel toggle, then fill layer 2. The first two rungs need no new code.</p>
+</section>
+
+<section id="not-established">
+  <h2>Not established</h2>
+  <ul>
+    <li>How a physical Fn press sets <code>0x20000090</code> (the gate above).</li>
+    <li>Every reader of the mode byte, including any built with <code>movw/movt</code>.</li>
+    <li>Whether the event path reports press and release distinctly enough to hook, or whether the actuation state is the only reliable site.</li>
+    <li>The whole page is static: no Fn2 code has been written, built or flashed.</li>
+  </ul>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="key-pipeline.html">Key pipeline &amp; remap surface</a> — the layer tables, the lookup and the OS mode byte this design borrows.</li>
+    <li><a href="mod-surface.html">Modification surface</a> — the data hooks the first three rungs of the ladder use.</li>
+    <li><a href="rebuild-vs-patch.html">Rebuild or patch</a> — why this is level 3 (new code in blank flash) and what that level costs.</li>
+    <li><a href="../PLAN.html">Plan</a> — phase 6 is still gated; this page is a feasibility answer, not a build.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

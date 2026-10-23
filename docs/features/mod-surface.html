@@ -113,6 +113,7 @@ BA    EA 00   Volume Down   table
     <li><strong>Independent of the app.</strong> Because both usages are in the table, no NVM remap has to be active; re-flashing the whole image would otherwise wipe those pages. Ids keep their scan positions, so per-key actuation records stay on the same physical keys.</li>
     <li><strong>Still in the gates.</strong> Four bytes, no length change, all at or above <code>0x16A96</code>; the version word below it and the RCDATA size are untouched. <code>analysis/fw_volpatch.py --chord-only</code> builds the two-byte variant for the case where the app remap is guaranteed to stay.</li>
   </ul>
+  <p>The same dispatcher that serves this row has a fourth, unreachable layer — the starting point for <a href="fn2.html">a second Fn key</a>.</p>
 </section>
 
 <section id="actuation">
@@ -175,6 +176,7 @@ BA    EA 00   Volume Down   table
     <li><a href="fw-image.html">Firmware image</a> — vector table, region map, checksum hunt.</li>
     <li><a href="isp-protocol.html">ISP protocol</a> — the AA 55 command set that would carry a patched image.</li>
     <li><a href="rebuild-vs-patch.html">Rebuild or patch</a> — why these offsets are the strategy, and how far a hook into blank flash could go.</li>
+    <li><a href="fn2.html">A second Fn key (Fn2)</a> — the level-3 design that would use the dispatcher's unused fourth layer.</li>
     <li><a href="../PLAN.html">Plan</a> — phase 5 (this inventory) and the user-gated phase 6.</li>
   </ul>
 </section>
