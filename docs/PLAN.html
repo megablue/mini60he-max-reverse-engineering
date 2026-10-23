@@ -205,6 +205,43 @@ img{max-width:100%;height:auto}
 <li>The <code>.hex</code> branch <code>(type 1)</code> is untested for this image; neither artifact needs it.</li>
 </ul>
 </section>
+<section id="backlog">
+<h2>Candidate modifications, ranked by cost</h2>
+<p>Nothing here is committed work; it is the menu the analysis has earned. Every entry is <strong>table data or tooling, not new firmware code</strong>, because the two levers are already proven on hardware: the key catalog at <code>0x9600 + id*4</code> (4-byte record, kind 2 with the usage at <code>+2</code>) decides what a key sends, and the Fn overlay at <code>0x16C3E + row*2</code> (51 rows, input usage → output enum) decides what <code>Fn</code>+key becomes. The output column is not HID: it is a vendor enum resolved through <code>0x16BF6</code> (media, <code>0xB0</code>–<code>0xC0</code>) and <code>0x16BE6</code> (WASD/arrow virtual codes <code>0xF8</code>–<code>0xFF</code>).</p>
+<h3>Tier A — no flash, no risk</h3>
+<table>
+<thead>
+<tr><th>Idea</th><th>Effort</th><th>Why</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>One-command build.</strong> <code>analysis/fw_build.py "CapsLock=Esc" "Fn+Z=PlayPause"</code> → image plus patched exe and a manifest</td><td>1–2 h</td><td>Generalises the two hardcoded builders (<code>fw_volpatch.py</code>, <code>fw_bake3.py</code>) on top of <code>fw_remap.py</code>'s resolver. Turns every entry below into one line.</td></tr>
+<tr><td><strong>Preflight guard.</strong> <code>analysis/fwbake_check.py</code>: length unchanged, every diff byte attributed to the table that owns it, refusal outside a declared edit set</td><td>~1 h</td><td>Replaces "I believe four bytes changed" with a printed receipt before any write. Cheap insurance on a no-readback device.</td></tr>
+<tr><td><strong>Stock cheat sheet.</strong> Every built-in combination generated from the tables — <code>Fn+F11</code>/<code>Fn+F12</code> volume, <code>Fn+A</code>/<code>Fn+S</code>/<code>Fn+D</code> OS mode, <code>Fn+W</code> Bluetooth, <code>Fn+K</code>/<code>Fn+L</code>/<code>Fn+U</code>/<code>Fn+I</code>/<code>Fn+O</code>, <code>Fn+,</code>/<code>Fn+.</code>/<code>Fn+Enter</code></td><td>~1 h</td><td>Features the keyboard already has, most of them unlisted anywhere. Four are hardware-verified; the rest is table arithmetic.</td></tr>
+</tbody>
+</table>
+<h3>Tier B — one flash, table data only</h3>
+<table>
+<thead>
+<tr><th>Idea</th><th>Effort</th><th>Why it is worth a write</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Settings baked into the image</strong> (highest value)</td><td>3–4 h</td><td>Every flash wipes the app's configuration, proven on 2026-10-22 (macro and the <code>CapsLock</code> remap vanished). Write the remaps into the NVM pages inside the image instead and the keyboard boots already customised: no app, and it survives every future reflash. Loader confirmed at <code>0x5924</code>–<code>0x599C</code>: <code>0xB000 + id*4</code> is copied into the catalog RAM slot <code>0x200026AE</code>, <code>0xB600 + id*8</code> into the per-key record slot <code>0x2000386E</code>, with <code>0x8400</code>/<code>0x8500</code> as the u16 fallbacks. Both pages are all zeros in the factory image. One unknown: the validity byte read as <code>[0xB600 + id*8]</code>, which defaults to <code>5</code> when zero — one flash answers it.</td></tr>
+<tr><td><strong>Fn media layer.</strong> Spend the 13 dead rows (<code>F1</code>–<code>F12</code> plus <code>0x4C</code> Insert are unreachable on a 60%) on real shortcuts</td><td>~1 h</td><td>Two bytes per row, row count stays 51, no relocation. <code>Fn+Z</code> = Play/Pause is <code>0x16C40</code>: <code>3A C1</code> → <code>1D B3</code>; <code>0xB0</code>/<code>0xB1</code>/<code>0xB2</code>/<code>0xB3</code>/<code>0xB5</code> (next, previous, stop, play/pause, mute) are the verified media actions, and <code>B C F G H J M N P T V X Y Z</code> are letter keys with no Fn row yet.</td></tr>
+<tr><td><strong>Global actuation default.</strong> The 224 bytes of <code>0x8400</code> and <code>0x8500</code></td><td>~1 h</td><td>Uniform today at <code>0x0996</code> and <code>0x0664</code> (ratio 3:2). Lower both for a hair-trigger, raise both for a heavier feel. Honest caveat: these are the values a factory-reset state starts from, and the app's per-key settings override them, so this is base feel, not a per-key curve.</td></tr>
+<tr><td><strong>Recolour the lighting.</strong> Palette <code>0x17668</code> (red, orange, yellow, green, cyan, azure, white) and the hue ramp at <code>0x17837</code></td><td>2 h + iteration</td><td>Pure table, but the LED cell records at <code>0x174B9</code> are still undecoded, so expect two or three flashes to learn which table actually paints the keys.</td></tr>
+</tbody>
+</table>
+<h3>Tier C — small code constants (in place, 2–4 bytes)</h3>
+<p><strong>Snappier key feel:</strong> hysteresis <code>0x0C</code> at <code>0x3764</code>, commit delta <code>0x0A</code> at <code>0x54DE</code>, hold timer <code>0x1388</code> at <code>0x54A6</code>. This is the only genuine performance knob found, and also the easiest way to introduce chatter, so it needs a tuning ladder rather than a single write. <strong>Second Fn</strong> is already specced but is not small: it is the first patch that must add code (~60–120 bytes into blank flash, 2–4 days, 2–3 flashes) — see <a href="features/fn2.html">A second Fn key (Fn2)</a>.</p>
+<h3>Ruled out, and why</h3>
+<ul>
+<li><strong>Wireless dead window.</strong> The unresponsive seconds after a wireless wake cannot be in this image: a wired replug resets the MCU and is instant, so boot plus Hall calibration are sub-second; the delay is RF link establishment in the dongle/module, outside <code>0x7E000</code>.</li>
+<li><strong>Macro engine.</strong> The per-key model is one 4-byte record — a single usage or a single special action. A multi-step timed macro has no storage slot, so it is a code and data-format project, not a table edit.</li>
+<li><strong>Flash readback.</strong> The updater has no read command at all, so a stock backup, a diff after writing, or a settings export all stay impossible. Every write remains one-way.</li>
+</ul>
+<h3>The rule that keeps these cheap</h3>
+<p>All of Tier A and B preserve the image length and touch only tables at <code>0x9600</code> or above, so the tool's size gate and checksum behave exactly as in the stock flow. The one gate that could still refuse a write is the version word, compared against a dword read at <code>fwbuf[idx*2]</code> for a small <code>idx</code> taken from the chip record — no table at these offsets can be that word. A refusal is a pre-write check, so a mismatch costs a click, not a keyboard.</p>
+</section>
 <section id="rebuild-or-patch">
 <h2>Strategy: patch, not rebuild</h2>
 <p>Asked whether the firmware could be rebuilt from source, the answer is no, and the record lives in <a href="features/rebuild-vs-patch.html">Rebuild or patch</a>: 36.1% of main code reached with 177 orphan runs, no SoC register documentation, no debug or readback path, an unknown device-side bootloader, an unexamined runtime config protocol, and a wireless module whose firmware is not in this image. A byte-exact rebuild is unattainable in principle; a behavioural rewrite would be a new wired keyboard.</p>
@@ -233,6 +270,7 @@ img{max-width:100%;height:auto}
 <li><strong>Second Fn answered (2026-10-24, static):</strong> a second Fn-like modifier is realistic but is the first patch that must add code — there is no table-only route, because the Fn map is picked by the persistent OS-mode byte, not by which modifier is held. The cheap part is already in the image: the dispatcher <code>0x2FF0</code> loads four 51-row bases and branches to <code>0x16D0C</code> for mode 2, which nothing writes, so layer 2 is a free second map. Design and costs are in <a href="features/fn2.html">A second Fn key (Fn2)</a>; the one unresolved gate is how a physical Fn press sets <code>0x20000090</code>.</li>
 <li><strong>Strategy recorded (2026-10-22):</strong> no rebuild — the image is patch-only, with three patch levels (table/constant, in-place code, hooks into blank flash) and table edits first. Measured coverage, the six reasons a rebuild is out and the constraints are in <a href="features/rebuild-vs-patch.html">Rebuild or patch</a>.</li>
 <li><strong>Repository:</strong> <code>git init</code> happened on 2026-10-22 (branch <code>main</code>, local only, nothing pushed); the scaffold was among the first commits. <code>analysis/out/</code> stays ignored, the vendor exe is committed, the licence is MIT for the analysis only.</li>
+<li><strong>Backlog written (2026-10-24):</strong> <a href="#backlog">Candidate modifications</a> ranks what is actually cheap — three no-flash items (one-command build, preflight guard, stock cheat sheet), four one-flash table edits led by baking settings into the image so a reflash stops wiping them, three small code constants, and the three things the image cannot reach (wireless, macros, readback). Nothing in it is committed work.</li>
 </ul>
 </section>
 <section id="related">

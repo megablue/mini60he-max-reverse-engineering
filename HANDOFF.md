@@ -212,6 +212,20 @@ derived from the image rather than traced to the loop counter; recovery from an
 interrupted write still unproven) live in
 [the runbook](docs/PLAN.html#flash-runbook).
 
+Backlog recorded (2026-10-24). Asked what else is cheap, the answer is now
+written down rather than living in the chat: [Candidate
+modifications](docs/PLAN.html#backlog) ranks everything by cost. Tier A needs no
+flash — a one-command builder (`fw_build.py`: remap list in, image plus exe out),
+a preflight guard that attributes every diff byte to its owning table, and a
+generated stock cheat sheet of the built-in Fn combinations. Tier B is one flash
+of table data, led by baking the app's settings into the NVM pages `0xB000`/
+`0xB600` of the image so a reflash stops wiping them (loader `0x5924`–`0x599C`
+confirmed; the one unknown is the `0xB600` validity byte that defaults to `5`),
+then a Fn media layer spending the 13 dead rows, the global actuation defaults
+`0x8400`/`0x8500` (uniform `0x0996`/`0x0664`), and a lighting recolour. Tier C
+is the three key-feel constants. Wireless wake, macros and readback are recorded
+as unreachable. Nothing in the backlog is committed work.
+
 Strategy recorded (2026-10-22). Asked whether the firmware could be rebuilt from
 source, the answer is no, and it is now written down instead of living in session
 memory: 36.1% of main code reached with 177 orphan runs, no SoC register
