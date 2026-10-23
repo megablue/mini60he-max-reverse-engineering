@@ -29,5 +29,7 @@ Firmware and the keyboard
 
 The firmware image examined here is read out of that installer and is not
 redistributed (analysis/out/ is generated locally and git-ignored). Writing a
-modified image to a device is the device owner's decision; the repository ships
-no flashing automation and never contacts hardware.
+modified image to a device is the device owner's decision. The repository ships
+no unattended flashing automation and never contacts hardware on its own:
+analysis/fw_build.py produces a patched copy of the vendor's installer, which a
+person still has to run and confirm by clicking Start.

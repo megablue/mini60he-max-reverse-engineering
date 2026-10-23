@@ -31,6 +31,15 @@ Everything here is **file analysis**: no script opens a HID device, the updater 
 **never executed**, and writing to the keyboard is a manual step that belongs to its owner
 (see [Fences](#fences)).
 
+> [!WARNING]
+> **`analysis/fw_build.py` builds a firmware image and a patched updater that writes it to real
+> hardware - at your own risk, with no safety net.** The vendor tool has no flash-read command, so
+> there is no stock backup: the only copy of the original firmware is the one inside
+> `bin/…V1.52.exe`. An ISP write also erases the device's own per-key settings and macro pages
+> (`0xB000`/`0xB600`), and recovery from an interrupted write is unverified. Read
+> [Flashing (owner action)](#flashing-owner-action) and [Gates](#gates) before you run anything from
+> this repository, and expect to lose the board if the write is interrupted.
+
 ## What this is
 
 - **The target.** A one-click production flasher: MFC/C++ x86, VS2008, EV-signed by
@@ -211,6 +220,18 @@ hooks into the ~400 KiB of blank flash above `0x18600` - with table edits first.
 the constraints.
 
 ### Flashing (owner action)
+
+Nothing in this repository flashes anything, and no script here talks to a device. If you decide to
+write a built image, you are on the vendor's one-way path:
+
+- **No backup.** The tool has no flash-read command, so nothing can dump the stock image first
+  (see [Gates](#gates)). The original is the copy inside `bin/…V1.52.exe`, and only if its hash is
+  the pinned one.
+- **Settings are erased.** The write covers the whole `0x7E000` image, including the blank
+  `0xB000`/`0xB600` parameter pages where the app stores remaps and macros. Re-enter them in the
+  app afterwards, or bake them into the image.
+- **Interrupted = unknown.** The bootloader sits outside the app span and no recovery path was
+  exercised, so an interrupted write is an unresolvable brick until proven otherwise.
 
 Close the config app, connect the keyboard by wire, run the patched updater, press `Start`, and do
 not touch the device until it reports done. Revert = run the **original** `bin/…V1.52.exe`, whose
