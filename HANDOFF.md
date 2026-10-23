@@ -189,6 +189,19 @@ derived from the image rather than traced to the loop counter; recovery from an
 interrupted write still unproven) live in
 [the runbook](docs/PLAN.html#flash-runbook).
 
+Strategy recorded (2026-10-22). Asked whether the firmware could be rebuilt from
+source, the answer is no, and it is now written down instead of living in session
+memory: 36.1% of main code reached with 177 orphan runs, no SoC register
+documentation, no readback or debug path, an unknown device-side bootloader, an
+unexamined runtime config protocol, and a wireless module whose firmware is not in
+this image. A byte-exact rebuild is unattainable in principle; a behavioural
+rewrite would be a different, wired keyboard. The work is therefore patch-only, in
+three levels — table or constant, in-place code, and hooks into the roughly
+400 KiB of blank flash above `0x18600` — with table edits first and one
+falsifiable hypothesis per write.
+[Rebuild or patch](docs/features/rebuild-vs-patch.html) holds the measurements and
+the constraints; [Plan](docs/PLAN.html#rebuild-or-patch) records the decision.
+
 ## Open threads
 
 - The old misspelled sibling folder was removed on 2026-10-22; only this

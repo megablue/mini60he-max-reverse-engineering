@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="megablue">
 <title>Mini60HE Max Firmware Reverse Engineering — plan</title>
 <meta name="generator" content="html-as-doc">
 <meta name="doc-source" content="docs/PLAN.md">
@@ -196,6 +197,11 @@ img{max-width:100%;height:auto}
 <li>The <code>.hex</code> branch <code>(type 1)</code> is untested for this image; neither artifact needs it.</li>
 </ul>
 </section>
+<section id="rebuild-or-patch">
+<h2>Strategy: patch, not rebuild</h2>
+<p>Asked whether the firmware could be rebuilt from source, the answer is no, and the record lives in <a href="features/rebuild-vs-patch.html">Rebuild or patch</a>: 36.1% of main code reached with 177 orphan runs, no SoC register documentation, no debug or readback path, an unknown device-side bootloader, an unexamined runtime config protocol, and a wireless module whose firmware is not in this image. A byte-exact rebuild is unattainable in principle; a behavioural rewrite would be a new wired keyboard.</p>
+<p>What the evidence supports is a patch spectrum — table or constant, in-place code, and hooks into the roughly 400 KiB of blank flash above <code>0x18600</code> — under one rule: table edits come first, a hook is spent only on a feature with no table slot, and every write is one falsifiable hypothesis, validated on hardware before the next layer is trusted. The constraints (no readback, settings wiped on every flash, interrupted-write risk, wireless out of reach) are on that page rather than repeated here.</p>
+</section>
 <section id="status">
 <h2>Status</h2>
 <p>As of 2026-10-24:</p>
@@ -216,6 +222,7 @@ img{max-width:100%;height:auto}
 <li><strong>Target locked (2026-10-24):</strong> the Fn output column is a vendor enum (<code>0x16BF6</code>, indexed <code>0xB0 + k</code>). Five on-keyboard tests fixed it: <code>Fn+1</code> = F1, <code>Fn+W</code> = BT host 2, <code>Fn+F7/F8/F9/F10</code> = prev / play-pause / next / mute. <code>0xB9</code> = Volume Up, <code>0xBA</code> = Volume Down — and rows 11/12 already map <code>F11/F12</code> to them, so <code>Fn+F12</code> is a zero-flash proof of the whole chain. The user's chord is four bytes — the Fn-map row plus the two usage-table bytes that make the image independent of the app's remap; see <a href="#first-patch">The first patch</a>.</li>
 <li><strong>Hardware symptom on file (2026-10-24):</strong> in wireless mode a key runs its configured macro only after a dead window of a few seconds on wake; wired replug and wire-mode switching are immediate. Wired boot is sub-second, so the window sits after the MCU, not in this image — but the Fn enum contains BT host switching (<code>0xA0–0xA3</code>), so a host↔radio command channel exists even though no radio peripheral appears in the image. Parked until the patch is decided.</li>
 <li><strong>Flash go recorded (2026-10-24):</strong> the user chose the second-unit path, so the write is planned, not done. Artifacts are staged as <code>analysis/out/fw_stock.bin</code> (factory, <code>06a1a474…</code>) and <code>analysis/out/fw_volplus.bin</code> (bake, <code>ac46b5aa…</code>); the tool's <code>.bin</code> branch was verified to feed the same firmware pointer the bundled loader uses. Steps, abort conditions and the remaining inferences are in <a href="#flash-runbook">Flash runbook</a>. Nothing has been written to any device.</li>
+<li><strong>Strategy recorded (2026-10-22):</strong> no rebuild — the image is patch-only, with three patch levels (table/constant, in-place code, hooks into blank flash) and table edits first. Measured coverage, the six reasons a rebuild is out and the constraints are in <a href="features/rebuild-vs-patch.html">Rebuild or patch</a>.</li>
 <li><strong>Deferred by user decision:</strong> <code>git init</code> — commit rules dormant until then; the scaffold is the first commit when it happens.</li>
 </ul>
 </section>
@@ -225,6 +232,7 @@ img{max-width:100%;height:auto}
 <li><code>AGENTS.md</code> — process and hard rules (immutability of <code>bin/</code>, evidence discipline).</li>
 <li><code>docs/SPEC.md</code> — user-visible behavior spec (verified behavior rows, sourced from the firmware image; nothing observed on hardware yet).</li>
 <li><code>docs/features/index.html</code> — the map index; <code>docs/features/binary-evidence.html</code> holds the binary pin.</li>
+<li><code>docs/features/rebuild-vs-patch.html</code> — why the work is patching and how far a hook into blank flash can go.</li>
 <li><code>HANDOFF.md</code> — the volatile session-state snapshot.</li>
 </ul>
 </section>

@@ -16,6 +16,14 @@ will stop at their SHA-256 check with a clear message.
 Everything else in this repository - the analysis scripts, the documentation and
 the findings written in them - is MIT licensed, see LICENSE.
 
+Analysis
+========
+
+The reverse engineering, the analysis scripts and the documentation are by
+megablue, and are MIT licensed (see LICENSE). "Author" here means the author of
+that analysis - not of the updater or the firmware, which remain their vendor's
+work as described above.
+
 Firmware and the keyboard
 =========================
 

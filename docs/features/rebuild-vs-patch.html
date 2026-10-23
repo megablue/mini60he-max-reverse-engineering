@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="megablue">
+<meta name="generator" content="opencode-feature-map">
+<title>Rebuild or patch — why reconstruction is out and how far patching reaches</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>Rebuild or patch — why reconstruction is out and how far patching reaches</h1>
+<p class="status">Status: decision (2026-10-22) — the image is patch-only; patching has three levels and roughly 400 KiB of blank flash for hooks · Read when: asking whether the firmware can be rebuilt from source, scoping a feature that has no table slot, or justifying a hook into free flash</p>
+
+<section id="question">
+  <h2>The question and the verdict</h2>
+  <p><strong>Can the firmware be rebuilt from the ground up, from source?</strong> No — not from the evidence in this repository. Both readings of the question are closed:</p>
+  <ul>
+    <li><strong>Decompile, then recompile byte-exact.</strong> Impossible even with perfect decompilation. The image is vendor Thumb built by an unknown SDK, toolchain and link order, and no symbol table survives; a recompile would differ in every non-trivial function. "Byte-identical" is not a data problem, it is unattainable in principle without the original build.</li>
+    <li><strong>Write new firmware that behaves the same.</strong> Not blocked by the binary but by hardware knowledge — see <a href="#rebuild-gaps">the gap list</a>. Without the SoC register map, debug access and the second radio, a rewrite would be a new wired keyboard, not this one.</li>
+  </ul>
+  <p>What the evidence does support: byte edits in known tables, and new code placed in unused flash. That is <a href="#patch-spectrum">the patch spectrum</a>, and it is the project's decision.</p>
+</section>
+
+<section id="coverage">
+  <h2>Where reconstruction actually stands</h2>
+  <table>
+  <thead><tr><th>Region</th><th>Instruction bytes reached</th><th>Note</th></tr></thead>
+  <tbody>
+  <tr><td>main code <code>0x0</code>–<code>0x9810</code></td><td>36.1%</td><td>393 function starts, 11,095 instructions</td></tr>
+  <tr><td>island <code>0xAE10</code>–<code>0xAFFF</code></td><td>45.6%</td><td>isolated chunk with a literal pool</td></tr>
+  <tr><td>USB / mixed band <code>0xBA00</code>–<code>0x185E8</code></td><td>24.6%</td><td>band includes strings, descriptor templates, LED tables</td></tr>
+  <tr><td>orphan runs</td><td>177 decoded runs ≥16 insns</td><td>real code the recursive-descent call graph never reaches</td></tr>
+  </tbody>
+  </table>
+  <p>Two cautions on those numbers. The recursion misses roughly half the firmware because dispatch is indirect — USB callbacks, state machines, function-pointer tables — so <code>36%</code> understates the code that exists and overstates how much is understood. And "reached" is not "understood": the docs explain perhaps 30–40 of the 393 functions in any real sense. Source: <code>analysis/fw_code.py</code> → <code>analysis/out/fw_code.txt</code>.</p>
+</section>
+
+<section id="rebuild-gaps">
+  <h2>Why a rebuild is out</h2>
+  <h3>On the device side</h3>
+  <ul>
+    <li><strong>The SoC is undocumented here.</strong> The notes know <em>which</em> registers are touched — USB <code>0x4001F0xx</code>, LED <code>0x4001B2xx</code>, Hall <code>0x40027000</code>, GPIO <code>0x4003{7,8,9,A}000</code>, clock <code>0x4002103C</code>, flash <code>0x40057000</code> — but not their semantics: clock tree, USB PHY and endpoint setup, flash timing, sleep. The names <code>SN34F280</code>/<code>SN8F2250</code> exist only as strings in the updater.</li>
+    <li><strong>No debug access identified.</strong> No SWD or JTAG path is documented, and the updater has no flash-read command, so there is no way to dump the current flash, single-step or instrument a candidate build. This is the difference between an RE project and a firmware-development project.</li>
+    <li><strong>The bootloader is unknown.</strong> Only the PC-side ISP protocol is mapped; the device-side entry handshake, bootloader-ID check, page-program mechanics and therefore the recovery path for a bad image are unverified. A from-scratch app would still have to be a valid payload for that bootloader.</li>
+  </ul>
+  <h3>Around the device</h3>
+  <ul>
+    <li><strong>The runtime config protocol is unexamined.</strong> The updater was reversed; the app that writes remaps and macros talks to the keyboard over HID feature reports at runtime, and that protocol — plus the exact NVM format it writes — is inferred from the firmware's read sites, never observed from the writer.</li>
+    <li><strong>Wireless is a second computer.</strong> The RF/BT module's firmware is not in this image, its transport is not identified (no UART, SPI or I2C controller appears in the peripheral set, yet Fn+W commands Bluetooth host 2), and the dongle is separate again. Any rewrite without PCB work ships a wired-only keyboard.</li>
+    <li><strong>No build system.</strong> No linker script, scatter file, toolchain identity or linker order; the vector table is the only layout evidence.</li>
+  </ul>
+</section>
+
+<section id="patch-spectrum">
+  <h2>The patch spectrum</h2>
+  <p>"Patch the binary" is not one technique. Three levels, in ascending risk:</p>
+  <table>
+  <thead><tr><th>Level</th><th>What changes</th><th>Examples</th></tr></thead>
+  <tbody>
+  <tr><td>1 — table or constant</td><td>a value at a known offset in a known table</td><td>keymap usage, Fn overlay row, LED palette, hysteresis constant</td></tr>
+  <tr><td>2 — in-place code</td><td>one or two instructions in a verified window</td><td>change a compare constant, force a branch</td></tr>
+  <tr><td>3 — hook into free flash</td><td>a <code>bl</code> at a function entry plus new Thumb at <code>0x20000</code>+</td><td>tap-hold, combos, real multi-step macros, new Fn actions</td></tr>
+  </tbody>
+  </table>
+  <p><strong>Why level 3 is reachable.</strong> The app span is <code>0x7E000</code> but only about <code>0x18600</code> is used. The rest is <code>0x00</code> fill except two islands: the <code>0xAE10</code>–<code>0xAFFF</code> code chunk and the <code>0xB000</code>–<code>0xBA00</code> NVM parameter page. That leaves roughly 400 KiB of blank, programmable space. A level-3 build needs no vendor SDK: <code>arm-none-eabi-as</code>, a linker script placing <code>.text</code> at <code>0x20000</code>, <code>objcopy -O binary</code>, then a splice — with a verifier asserting the diff is exactly the intended offsets, the pattern already used by <code>analysis/fw_volpatch.py</code> and <code>analysis/mkflasher.py</code>.</p>
+</section>
+
+<section id="constraints">
+  <h2>What constrains every flash</h2>
+  <ul>
+    <li><strong>No readback, no breakpoints.</strong> A patch must be provably correct by construction: disassemble the exact window, prove register and stack state are unchanged, and keep the change small enough to review by eye.</li>
+    <li><strong>Every flash is a whole-image write.</strong> The blank <code>0xB000</code>/<code>0xB600</code> pages overwrite user settings, so app-side remaps and macros are re-entered after each write (confirmed on hardware, 2026-10-22).</li>
+    <li><strong>Interrupted write is the brick scenario.</strong> The bootloader sits outside the <code>0x7E000</code> app span, but recovery is unverified.</li>
+    <li><strong>Wireless behaviour is out of reach.</strong> The dead window after wake lives in the RF module; nothing in this image fixes it.</li>
+    <li><strong>Length preservation keeps the gates satisfied.</strong> The tool recomputes the checksum itself, the RCDATA size gate only trips on growth, and the version compare is a pre-write refusal rather than a brick risk. All bakes so far sit at <code>≥ 0x972E</code>; the gate's version dword is somewhere in the low image, so nothing below <code>0x16A96</code> moves without a hardware-proven reason.</li>
+  </ul>
+</section>
+
+<section id="order">
+  <h2>The rule that follows</h2>
+  <ul>
+    <li><strong>Table first.</strong> Anything expressible as a table row or a constant stays level 1 or 2. Highest confidence, smallest blast radius, and every byte provable against the pinned image.</li>
+    <li><strong>Level 3 only for features with no table slot</strong> — and only after a level-1 or level-2 patch in the same mechanism has been validated on hardware (the row-32 bake was proven that way, without a second flash).</li>
+    <li><strong>One falsifiable hypothesis per write.</strong> Prefer zero-flash validation where a stock behaviour already exercises the path — Fn+F12 = Volume Up proved the <code>0xB9</code> enum without writing anything.</li>
+  </ul>
+</section>
+
+<section id="not-established">
+  <h2>Not established</h2>
+  <ul>
+    <li>Whether SWD/JTAG pads exist on the PCB, and whether the bootloader can be re-entered after a failed app image.</li>
+    <li>The exact dword the version gate reads, and whether it tolerates edits in the low image beyond the ranges already exercised.</li>
+    <li>The wireless module's transport and firmware — needs PCB identification.</li>
+    <li>Level 3 itself: no hook has been built or flashed yet. The reasoning above is about feasibility, not a proven result.</li>
+  </ul>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="mod-surface.html">mod-surface.html</a> — the offsets a patch actually lands on, and the four gates.</li>
+    <li><a href="key-pipeline.html">key-pipeline.html</a> — the scan → id → usage path a keymap edit rides.</li>
+    <li><a href="fw-image.html">fw-image.html</a> — regions, fill, and the vector table at <code>0x0</code>.</li>
+    <li><a href="../PLAN.html">docs/PLAN.html</a> — phases and the write gate.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

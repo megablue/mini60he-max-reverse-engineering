@@ -1,14 +1,47 @@
+<div align="center">
+
+<img src="docs/assets/header.svg" alt="Mini60HE Max firmware reverse engineering - the four bytes that move a keystroke" width="860" />
+
+</div>
+
 # Mini60HE Max Firmware Reverse Engineering
 
-Static reverse engineering of the **Mini60HE Max** vendor updater (`SONiX` ISP tool, rebranded)
-and of the firmware image embedded inside it, so that keyboard behaviour - key layout, Fn layer,
-lighting - can be changed at the firmware level instead of through the vendor app.
+Static reverse engineering of the **Mini60HE Max** vendor updater (a rebranded `SONiX` ISP tool)
+and of the firmware image embedded in it, so that key layout, the Fn layer and lighting can be
+changed at the firmware level instead of through the vendor app.
 
-Everything here is **file analysis**. No script in this repository opens a HID device, and the
-updater executable is **never executed** by the tooling. Flashing is a manual step that belongs to
-the keyboard's owner (see [Fences](#fences)).
+<div align="center">
 
----
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-3776ab.svg?style=flat-square&logo=python&logoColor=white)](requirements.txt)
+[![Dependencies: pefile + capstone](https://img.shields.io/badge/dependencies-pefile%20%2B%20capstone-blue.svg?style=flat-square)](requirements.txt)
+[![Chip: SN34F280](https://img.shields.io/badge/chip-SN34F280-0e7490.svg?style=flat-square)](docs/features/key-pipeline.html)
+[![Topic: reverse-engineering](https://img.shields.io/badge/topic-reverse--engineering-0e7490.svg?style=flat-square)](https://github.com/topics/reverse-engineering)
+[![Buy me a coffee](https://img.shields.io/badge/buy%20me%20a%20coffee-PayPal-ffdd00.svg?style=flat-square&logo=buymeacoffee&logoColor=black)](https://www.paypal.me/mega3dp)
+
+</div>
+
+<div align="center">
+
+<sub>Reverse engineering, analysis scripts and documentation by [**megablue**](https://github.com/megablue)</sub>
+
+</div>
+
+Everything here is **file analysis**: no script opens a HID device, the updater executable is
+**never executed**, and writing to the keyboard is a manual step that belongs to its owner
+(see [Fences](#fences)).
+
+## What this is
+
+- **The target.** A one-click production flasher: MFC/C++ x86, VS2008, EV-signed by
+  Chinese FINDER (Dongguan) Technology, built 2026-01-21. No file picker, no command line - the
+  firmware is a resource and `Start` writes it to the first matching `0C45:80A1`.
+- **The image.** RCDATA `0xFA0`, `0x7E000` bytes of Cortex-M3 Thumb for a SONiX **SN34F280**,
+  carrying `MINI60HE MAX` and the HID descriptor templates.
+- **The question.** A keypress travels scan grid -> key id -> usage -> Fn overlay -> action enum
+  -> HID report. Finding the byte where each hop happens is the whole job.
+- **The answer.** Four bytes, in place, no relocation and no code patch: remap a key in the
+  catalog, give it a row in the Windows Fn overlay, and a chord nobody implemented starts working.
 
 ## Status
 
@@ -25,7 +58,22 @@ What works today: remapping any physical key to any usage, adding Fn-layer chord
 per-key actuation tuning, retuning LED tables. What does not: reading flash back from the device
 (the protocol has no dump command), and anything wireless - the radio is not in this image.
 
----
+## Quick start
+
+```powershell
+# from the root of a clone of this repository
+pip install -r requirements.txt
+
+python analysis/probe_pe.py     # verify the pinned exe, extract RCDATA 4000 -> analysis/out/
+python analysis/fw_keys.py      # or any other script: each one is standalone and offline
+```
+
+`probe_pe.py` creates `analysis/out/rcdata_4000.bin`, which every other script reads and
+SHA-256-checks before doing anything. If the vendor exe does not match the pin, it exits without
+writing and says so - the analysis is only valid for that exact build.
+
+Requirements: Python 3.10+, `pefile`, `capstone` (tested on 3.14 / pefile 2024.8.26 /
+capstone 5.0.7).
 
 ## The two artifacts
 
@@ -57,7 +105,109 @@ silence     no radio/BLE/2.4G strings, no UART/SPI/I2C controller in the periphe
 The image carries no checksum field and no stored version: the tool computes checksums itself and
 compares a chip-version word at flash time (see [Gates](#gates)).
 
----
+## How a key becomes a keystroke
+
+```
+Hall channels -> scan IRQ 0x0FC8 -> raw matrix 16ch x 8 lines
+      -> position map 0x16A96[128]      (channel + 8*drive_line -> key id, 0x7D = empty)
+      -> per-key output record 0x9600 + id*4   {kind, ?, usage, 0}
+             kind 2 = HID usage, kind 3 = vendor action (consumer/system page)
+      -> if Fn is held (usage 0xAF): overlay row 0x16C3E + mode*0x68, input usage -> action code
+      -> action code >= 0xB0 -> consumer usage via u16 table 0x16BF6 (0xB9 = Volume Up)
+      -> HID report
+```
+
+Coordinate table (offsets are image offsets):
+
+| What | Where | Notes |
+|---|---|---|
+| scan position -> key id | `0x16A96`, 128 B | 61 populated positions, `0x7D` empty |
+| key id -> usage | `0x16DDA`, 120 rows, count `u16 @0x16EC8` | feeds the reverse lookup only |
+| per-key output record | `0x9600`, 112 x 4 B | **the real output path**; usage at `+2` |
+| Fn overlays | `0x16C3E`, `0x16CA6`, `0x16D0C`, `0x16D72` | 51 rows x 2 B: input usage -> action |
+| action enum -> consumer usage | `0x16BF6`, u16 | `0xB0+k`; `0xB9` = Volume Up, `0xBA` = Volume Down |
+| WASD virtual codes | `0x16BE6` | `0xF8..0xFF` -> W/A/S/D and the arrow keys |
+| Fn detection | `cmp r0,#0xAF @0x147B6` | Fn is state only, it emits nothing |
+| per-OS mode byte | RAM `0x200000AE` | Fn+D = Windows, Fn+S = Mac, Fn+A = Android; layer 2 unused |
+| actuation | SM at `0x32AC` | hysteresis `0x3764`, commit delta `0x54DE`, hold timer `0x54A6` |
+| NVM settings | `0xB000 + id*4`, `0xB600 + id*8` | blank in the factory image, **erased by any flash** |
+| LED | palette `0x17668`, hue ramp `0x17837`, presets `0x17A83` | |
+
+Consequences worth knowing before patching:
+
+- editing `0x16DDA` alone changes nothing visible - it is a lookup table, not the emitter;
+- the catalog at `0x9600` is the emitter, and the NVM page overrides it per key when non-zero;
+- per-key actuation and lighting are **id-indexed**, so moving a key's id moves its tuning;
+- ids `0x58/0x59/0x5A/0x5B` (Left/Down/Up/Right) exist in both tables but own no scan position -
+  they are only reachable through a remap.
+
+## Building a modification
+
+```powershell
+# 1. plan a remap (read-only; prints the exact bytes for BOTH tables it must touch)
+python analysis/fw_remap.py "CapsLock=Esc" "Menu=Left"
+
+# 2. bake edits into the image and wrap them into a flasher copy
+python analysis/fw_bake3.py                 # current edit list -> analysis/out/fw_bake3.bin + ..._bake3.exe
+
+# 3. or wrap any image you already have
+python analysis/mkflasher.py analysis/out/fw_bake3.bin --out analysis/out/my_mod.exe
+```
+
+`mkflasher.py` locates RCDATA `0xFA0` by walking the resource tree (currently file `0x1BAA4C`),
+requires the replacement to be exactly `0x7E000` bytes, re-parses the result, verifies that every
+changed byte falls inside the slot, and writes a manifest with both SHA-256 values.
+Re-wrapping `fw_bake3.bin` reproduces `774bb728…` byte for byte.
+
+### Current bake
+
+| offset | edit | effect |
+|---|---|---|
+| `0x9752` | `E6 -> AF` | catalog id `0x54` (old right Alt) = Fn |
+| `0x9756` | `AF -> 4F` | catalog id `0x55` (old Fn) = Right Arrow |
+| `0x972E` | `E5 -> 52` | catalog id `0x4B` (right Shift) = Up Arrow |
+| `0x975A` | `65 -> 50` | catalog id `0x56` (Menu) = Left Arrow |
+| `0x975E` | `E4 -> 51` | catalog id `0x57` (right Ctrl) = Down Arrow |
+| `0x16E71/83/85/87/89` | same usages | id<->usage pair table kept in step |
+| `0x16C7E/7F` | `4C 49 -> 4F B9` | Fn row 32: Right Arrow -> Volume Up |
+
+`analysis/out/MINI60HE_max_bake3.exe` - 2,386,384 B, SHA-256 `774BB728…5FE9A9`, 12 bytes changed.
+
+### Why patch, not rebuild
+
+The image is not reconstructible from source: about 36% of main-code bytes are reached by the call
+graph, the SoC register map and a debug path are absent, and the wireless module's firmware is not in
+this image. What is available is a three-level patch surface - table or constant, in-place code, and
+hooks into the ~400 KiB of blank flash above `0x18600` - with table edits first.
+[`docs/features/rebuild-vs-patch.html`](docs/features/rebuild-vs-patch.html) has the measurements and
+the constraints.
+
+### Flashing (owner action)
+
+Close the config app, connect the keyboard by wire, run the patched updater, press `Start`, and do
+not touch the device until it reports done. Revert = run the **original** `bin/…V1.52.exe`, whose
+embedded image is stock.
+
+## Gates
+
+Any image you write has to survive four checks:
+
+1. **Chip-version gate** - the tool reads one dword of the image (`fwbuf[idx*2]`, index from the
+   chip record) and compares it with the device's version bytes; mismatch shows
+   *"Firmware Version is not for this chip!!"* and returns **before** erase/program. It is a
+   pre-write check, so a rejection costs nothing. The exact index is not pinned (see open items).
+2. **RCDATA size gate** - records with `field0 == 0` cap the blob at `0x8400`; the shipped image is
+   `0x7E000`, which passes only because the chip record actually used has `field0 != 0`.
+   Patching in place never changes the length, so this verdict is unchanged.
+3. **Checksum** - computed tool-side from the loaded bytes (`Bin File Check Sum : %.4X`,
+   big-endian 16-bit word sum), nothing is stored in the image. No image edit can desync it.
+4. **Authenticode** - covers the exe only; the upload path verifies nothing. A patched copy is
+   simply unsigned, and the tool runs anyway.
+
+**There is no flash-read command.** The `AA 55` set covers version, password, encryption, erase,
+program, checksum, code option and page writes; the only reads are echo/status gates and per-page
+verify. A stock device backup is therefore impossible with this tool - the stock firmware exists
+only as the copy inside the vendor exe.
 
 ## Repository layout
 
@@ -65,6 +215,7 @@ compares a chip-version word at flash time (see [Gates](#gates)).
 bin/                    the pinned vendor updater (never modified in place)
 analysis/               one script per question, all regenerable, all offline
 analysis/out/           generated evidence (git-ignored): transcripts, resources, built binaries
+docs/assets/header.svg  the image at the top of this page (no build step, plain SVG)
 docs/features/          the feature map - one HTML page per area
 docs/SPEC.html          user-visible behaviour of the device and the updater
 docs/PLAN.html          phases, fences, and the first-patch write-up
@@ -104,22 +255,6 @@ trail to those findings - no docstring, no pins, superseded by the reported ones
 plus the extracted resources (`rcdata_4000.bin`, small RCDATA ids), the ISP transcripts
 (`isp_walk.txt`, `isp_gate.txt`, `pw7_out.txt`) and the built binaries.
 
-Requirements: Python 3.10+, `pefile`, `capstone` (tested on 3.14 / pefile 2024.8.26 / capstone 5.0.7).
-Every script is standalone: `python analysis/fw_keys.py`.
-
-### First run after cloning
-
-```powershell
-pip install -r requirements.txt
-python analysis/probe_pe.py     # checks the pinned exe, extracts RCDATA 4000 -> analysis/out/
-```
-
-That one step creates `analysis/out/rcdata_4000.bin`, which every other script reads and
-SHA-256-checks before it does anything. If the vendor exe does not match the pin, `probe_pe.py`
-exits without writing and says so - the analysis is only valid for that exact build.
-
----
-
 ## Documentation map
 
 The feature map is the entry point: **`docs/features/index.html`**.
@@ -132,143 +267,51 @@ The feature map is the entry point: **`docs/features/index.html`**.
 | `fw-tables.html` | the layout/LED band: key universe, grouping tables, ramps, palettes |
 | `key-pipeline.html` | scan IRQ -> position map -> usage -> Fn overlay -> mode byte, actuation |
 | `mod-surface.html` | choosing a mod, computing an offset, the three remap hooks, the action enum |
+| `rebuild-vs-patch.html` | whether a rebuild is possible, and how far a hook into blank flash reaches |
 
 `docs/SPEC.html` states behaviour (typing, actuation, lighting, settings, updating);
 `docs/PLAN.html` holds the phases, the fences and the first-patch recipe.
 Those pages are HTML; a `.md` file next to one is a pointer stub, not the document.
 This README is the exception - it stays Markdown so a repository host can render it.
 
----
-
-## How a key becomes a keystroke
-
-```
-Hall channels -> scan IRQ 0x0FC8 -> raw matrix 16ch x 8 lines
-      -> position map 0x16A96[128]      (channel + 8*drive_line -> key id, 0x7D = empty)
-      -> per-key output record 0x9600 + id*4   {kind, ?, usage, 0}
-             kind 2 = HID usage, kind 3 = vendor action (consumer/system page)
-      -> if Fn is held (usage 0xAF): overlay row 0x16C3E + mode*0x68, input usage -> action code
-      -> action code >= 0xB0 -> consumer usage via u16 table 0x16BF6 (0xB9 = Volume Up)
-      -> HID report
-```
-
-Coordinate table (offsets are image offsets):
-
-| What | Where | Notes |
-|---|---|---|
-| scan position -> key id | `0x16A96`, 128 B | 61 populated positions, `0x7D` empty |
-| key id -> usage | `0x16DDA`, 120 rows, count `u16 @0x16EC8` | feeds the reverse lookup only |
-| per-key output record | `0x9600`, 112 x 4 B | **the real output path**; usage at `+2` |
-| Fn overlays | `0x16C3E`, `0x16CA6`, `0x16D0C`, `0x16D72` | 51 rows x 2 B: input usage -> action |
-| action enum -> consumer usage | `0x16BF6`, u16 | `0xB0+k`; `0xB9` = Volume Up, `0xBA` = Volume Down |
-| WASD virtual codes | `0x16BE6` | `0xF8..0xFF` -> W/A/S/D and the arrow keys |
-| Fn detection | `cmp r0,#0xAF @0x147B6` | Fn is state only, it emits nothing |
-| per-OS mode byte | RAM `0x200000AE` | Fn+D = Windows, Fn+S = Mac, Fn+A = Android; layer 2 unused |
-| actuation | SM at `0x32AC` | hysteresis `0x3764`, commit delta `0x54DE`, hold timer `0x54A6` |
-| NVM settings | `0xB000 + id*4`, `0xB600 + id*8` | blank in the factory image, **erased by any flash** |
-| LED | palette `0x17668`, hue ramp `0x17837`, presets `0x17A83` | |
-
-Consequences worth knowing before patching:
-
-* editing `0x16DDA` alone changes nothing visible - it is a lookup table, not the emitter;
-* the catalog at `0x9600` is the emitter, and the NVM page overrides it per key when non-zero;
-* per-key actuation and lighting are **id-indexed**, so moving a key's id moves its tuning;
-* ids `0x58/0x59/0x5A/0x5B` (Left/Down/Up/Right) exist in both tables but own no scan position -
-  they are only reachable through a remap.
-
----
-
-## Gates
-
-Any image you write has to survive four checks:
-
-1. **Chip-version gate** - the tool reads one dword of the image (`fwbuf[idx*2]`, index from the
-   chip record) and compares it with the device's version bytes; mismatch shows
-   *"Firmware Version is not for this chip!!"* and returns **before** erase/program. It is a
-   pre-write check, so a rejection costs nothing. The exact index is not pinned (see open items).
-2. **RCDATA size gate** - records with `field0 == 0` cap the blob at `0x8400`; the shipped image is
-   `0x7E000`, which passes only because the chip record actually used has `field0 != 0`.
-   Patching in place never changes the length, so this verdict is unchanged.
-3. **Checksum** - computed tool-side from the loaded bytes (`Bin File Check Sum : %.4X`,
-   big-endian 16-bit word sum), nothing is stored in the image. No image edit can desync it.
-4. **Authenticode** - covers the exe only; the upload path verifies nothing. A patched copy is
-   simply unsigned, and the tool runs anyway.
-
-**There is no flash-read command.** The `AA 55` set covers version, password, encryption, erase,
-program, checksum, code option and page writes; the only reads are echo/status gates and per-page
-verify. A stock device backup is therefore impossible with this tool - the stock firmware exists
-only as the copy inside the vendor exe.
-
----
-
-## Building a modification
-
-```powershell
-# 1. plan a remap (read-only; prints the exact bytes for BOTH tables it must touch)
-python analysis/fw_remap.py "CapsLock=Esc" "Menu=Left"
-
-# 2. bake edits into the image and wrap them into a flasher copy
-python analysis/fw_bake3.py                 # current edit list -> analysis/out/fw_bake3.bin + ..._bake3.exe
-
-# 3. or wrap any image you already have
-python analysis/mkflasher.py analysis/out/fw_bake3.bin --out analysis/out/my_mod.exe
-```
-
-`mkflasher.py` locates RCDATA `0xFA0` by walking the resource tree (currently file `0x1BAA4C`),
-requires the replacement to be exactly `0x7E000` bytes, re-parses the result, verifies that every
-changed byte falls inside the slot, and writes a manifest with both SHA-256 values.
-Re-wrapping `fw_bake3.bin` reproduces `774bb728…` byte for byte.
-
-### Current bake
-
-| offset | edit | effect |
-|---|---|---|
-| `0x9752` | `E6 -> AF` | catalog id `0x54` (old right Alt) = Fn |
-| `0x9756` | `AF -> 4F` | catalog id `0x55` (old Fn) = Right Arrow |
-| `0x972E` | `E5 -> 52` | catalog id `0x4B` (right Shift) = Up Arrow |
-| `0x975A` | `65 -> 50` | catalog id `0x56` (Menu) = Left Arrow |
-| `0x975E` | `E4 -> 51` | catalog id `0x57` (right Ctrl) = Down Arrow |
-| `0x16E71/83/85/87/89` | same usages | id<->usage pair table kept in step |
-| `0x16C7E/7F` | `4C 49 -> 4F B9` | Fn row 32: Right Arrow -> Volume Up |
-
-`analysis/out/MINI60HE_max_bake3.exe` - 2,386,384 B, SHA-256 `774BB728…5FE9A9`, 12 bytes changed.
-
-### Flashing (owner action)
-
-Close the config app, connect the keyboard by wire, run the patched updater, press `Start`, and do
-not touch the device until it reports done. Revert = run the **original** `bin/…V1.52.exe`, whose
-embedded image is stock.
-
----
-
 ## Fences
 
-* The vendor exe is **never executed** by any script in this repository; all evidence is static.
-* `bin/MINI 60 HE MAX_V1.52.exe` is treated as immutable - patches are built into copies.
-* No script opens, enumerates or writes to a HID device.
-* Writing to the keyboard is a deliberate manual step. Its only irreversible failure mode is an
+- The vendor exe is **never executed** by any script in this repository; all evidence is static.
+- `bin/MINI 60 HE MAX_V1.52.exe` is treated as immutable - patches are built into copies.
+- No script opens, enumerates or writes to a HID device.
+- Writing to the keyboard is a deliberate manual step. Its only irreversible failure mode is an
   **interrupted write**; recovery from a half-written image is unverified (the bootloader lives
   outside the `0x7E000` app span, but that has not been tested).
-* An ISP write erases the NVM settings pages, so macros and app-side remaps are lost and must be
+- An ISP write erases the NVM settings pages, so macros and app-side remaps are lost and must be
   re-entered. Anything that should survive belongs in a baked image.
-
----
 
 ## Open items
 
-* The chip-version gate's dword index is not pinned. Everything patched so far sits in table data
+- The chip-version gate's dword index is not pinned. Everything patched so far sits in table data
   and has passed on hardware, and a mismatch refuses the flash rather than bricking.
-* The wireless path is outside this image: the dead-window symptom on wireless wake (keys
+- The wireless path is outside this image: the dead-window symptom on wireless wake (keys
   unresponsive for a few seconds) is RF link establishment, not MCU boot - wired replug is instant.
   The firmware can still *command* the module (Fn+W sends Bluetooth host 2), so a host<->module
   channel exists even though no radio strings or serial peripheral are in the image.
-* `0x174B9` cell records (16-byte stride, per-key LED geometry) are only partly decoded.
-* The per-key LED gradient tables and the `0x17CC0` driver-init block are documented but untested
+- `0x174B9` cell records (16-byte stride, per-key LED geometry) are only partly decoded.
+- The per-key LED gradient tables and the `0x17CC0` driver-init block are documented but untested
   against hardware.
-* `analysis/out/` is intentionally untracked: it holds the extracted firmware and the built
+- `analysis/out/` is intentionally untracked: it holds the extracted firmware and the built
   installers, none of which belong in git history. Regenerate with `analysis/probe_pe.py`.
 
----
+## See also
+
+- [**mega-smart-context**](https://github.com/megablue/mega-smart-context) - the OpenCode plugin
+  this investigation runs on. It keeps a session's memory in a document the model writes, instead
+  of replaying a transcript, so the offsets, hashes and byte-level claims above survive across
+  sessions. The HTML feature map in `docs/` is the same workflow it enforces.
+- [`docs/features/index.html`](docs/features/index.html) - the map itself, if you would rather
+  start from the areas than from this page.
+
+## Buy me a coffee
+
+This work is free and MIT-licensed. If it saved you an evening of hex staring, you can
+[buy me a coffee via PayPal](https://www.paypal.me/mega3dp).
 
 ## License
 
@@ -276,3 +319,6 @@ Scripts, documentation and the findings written in them are MIT licensed - see `
 `bin/MINI 60 HE MAX_V1.52.exe` is a third-party vendor binary and is **not** covered: it stays in
 the tree because the scripts verify its hash and read the firmware out of it. See `NOTICE`.
 No flashing automation is distributed, and no script in this repository touches a device.
+
+Copyright (c) 2026 megablue. The reverse engineering, the analysis scripts and the documentation are
+my work; the updater and the firmware image are their vendor's.

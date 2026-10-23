@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="megablue">
 <meta name="generator" content="opencode-feature-map">
 <title>Mini60HE Max Firmware Reverse Engineering — features map</title>
 <style>
@@ -33,6 +34,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <tr><td>Keymap &amp; LED tables (fw band)</td><td><a href="fw-tables.html">fw-tables.html</a></td><td>the 0x16E00–0x185E8 layout/LED band inside RCDATA 4000 — 61-key universe, layout grouping tables, ramps/palettes/driver-init — decoding a key id, planning key remapping or RGB mods</td></tr>
 <tr><td>Key pipeline &amp; remap surface</td><td><a href="key-pipeline.html">key-pipeline.html</a></td><td>how a scanned key becomes a HID usage — the 0x0FC8 scan IRQ and 0x40027000 channel block, the 0x16A96 position map, the 0x16DD8 usage table, the four 51-row per-OS Fn-overlay tables and the Fn+S/Fn+D/Fn+A Windows/Mac/Android mode byte, the id 0x7D sentinel, actuation thresholds and the 0x5498 change filter - changing what a key sends</td></tr>
 <tr><td>Modification surface</td><td><a href="mod-surface.html">mod-surface.html</a></td><td>choosing a mod and computing a patch offset — the three key-remap hooks (<code>0x16DD8</code> usage table, four Fn overlays, <code>0x16A96</code> scan grid), the Fn action enum (<code>0xB0 + k</code> → consumer usages, so <code>0xB9</code> is Volume Up), the dead Fn rows and the two-byte chord patch, actuation defaults and the hysteresis/debounce immediates, the LED palette/hue/preset runs, and the length/version/checksum/signature gates a patched image must survive</td></tr>
+<tr><td>Rebuild or patch</td><td><a href="rebuild-vs-patch.html">rebuild-vs-patch.html</a></td><td>deciding whether the firmware can be reconstructed from source, scoping a feature with no table slot, or justifying a hook into the 400 KiB of blank flash — measured code coverage, the six reasons a rebuild is out, the three patch levels and their constraints</td></tr>
 </tbody>
 </table>
 <!-- One row per feature page. Keep "Read when" a trigger, not a restatement of
