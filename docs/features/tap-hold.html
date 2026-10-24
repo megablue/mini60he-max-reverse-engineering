@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="megablue">
+<meta name="generator" content="opencode-feature-map">
+<title>Tap and hold — arrow on tap, modifier on hold (feasibility, RCDATA 4000)</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3em;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>Tap and hold — arrow on tap, modifier on hold (feasibility, RCDATA 4000)</h1>
+<p class="status">Status: feasibility study (2026-10-24, static) — no table can express it, so this is the smallest code patch on the roadmap (~300 B, 4 keys, 32 B RAM); the millisecond tick, the per-key press/release state and the modifier latch are verified, the exact interception line and the release edge are not · Read when: asking for tap-and-hold keys on the right-hand cluster, planning the first patch that adds code, or deciding whether the arrow remaps are worth their cost</p>
+
+<section id="what-it-is">
+  <h2>What it is</h2>
+  <p>The request: the four keys at the lower right should <strong>send an arrow when tapped and their normal modifier while held</strong> — right-<kbd>Shift</kbd> taps Up, the Menu key taps Left, right-<kbd>Ctrl</kbd> taps Down, right-<kbd>Alt</kbd> taps Right, and each holds its stock modifier.</p>
+  <p><strong>Verdict: possible, and this is the cheapest new-code patch found so far</strong> — smaller than the second-Fn design, with no new peripheral and no host software. It is still level 3: a table-only build cannot do it, because every table in the image maps a key to <em>one</em> value, chosen from the event, never from its duration.</p>
+  <p>It also removes the compromise baked into the flashed remap: that build bought arrows by giving up right-<kbd>Alt</kbd> (it became Fn), right-<kbd>Shift</kbd>, Menu and right-<kbd>Ctrl</kbd>. With tap and hold the same keys keep their stock roles and gain an arrow on tap, so no key has to disappear.</p>
+</section>
+
+<section id="why-tables-cannot">
+  <h2>Why a table cannot do it</h2>
+  <ul>
+    <li><strong>The catalog</strong> (<code>0x9600 + id*4</code>, kind 2 + usage at <code>+2</code>) is one usage per key. The app's per-key record in NVM (<code>0xB000</code>/<code>0xB600</code>) is the same shape: kind 3 is a single special action, not a sequence.</li>
+    <li><strong>The Fn overlay</strong> (<code>0x16C3E + row*2</code>) is also one output per row, and it is selected by the <em>Fn flag</em> and the OS mode byte, not by how long a key was held.</li>
+    <li><strong>Nothing stores a press time.</strong> The key state machine keeps a value, a peak, an actuation bit and a debounce timer per key; there is no "pending" slot and no duration comparison anywhere in the image.</li>
+    <li><strong>The macro player</strong> can wait (its steps carry delays), which proves the machine can time output — but it plays a stored script, not a per-key decision. It is the wrong tool and it lives in RAM, not on the key.</li>
+  </ul>
+  <p>So the patch must add code. That is why this page is a design and not a builder entry in the backlog.</p>
+</section>
+
+<section id="what-exists">
+  <h2>What the firmware already gives the patch</h2>
+  <table>
+    <thead><tr><th>Mechanism</th><th>Where</th><th>Why it matters</th></tr></thead>
+    <tbody>
+      <tr><td>Millisecond tick</td><td>SysTick handler <code>0x3FE8</code>, getter <code>0x3F08</code>, counter <code>0x200004A8</code>, reload math <code>0x4044</code></td><td>Duration is measurable in the same unit a person feels; the reload divides the core clock by <code>1000/step</code>.</td></tr>
+      <tr><td>Per-key press/release state</td><td>state machine <code>0x32AC</code>, id at <code>0x2000008B</code>, actuation bit 15 of <code>0x200031AE + id*2</code></td><td>Edges already exist per key; a pending record can hang off them.</td></tr>
+      <tr><td>Final usage dispatcher</td><td><code>0x1457E</code> reads <code>[base+4]</code> (base <code>0x20000088</code>), Fn overlay applied just before at <code>0x2FF0</code></td><td>One point where the finished usage — catalog, remap, Fn layer and OS mode all applied — is visible.</td></tr>
+      <tr><td>Modifier latch</td><td>8 bytes at <code>0x200000DE</code>, folded by <code>0x15FC</code></td><td>Held modifiers are state, not keystrokes, so a late commit is still correct.</td></tr>
+      <tr><td>Timed output precedent</td><td>macro player <code>0x534A</code>, Fn-flag step <code>0x53D4</code></td><td>A second writer of output already exists; the shape is not novel to the machine.</td></tr>
+    </tbody>
+  </table>
+</section>
+
+<section id="two-designs">
+  <h2>Two designs, one of them unusable</h2>
+  <h3>Retro-tap (rejected)</h3>
+  <p>Send the arrow on press and the modifier afterwards when the key is still down. This is what several commercial firmwares do and it is annoying: every attempt at <kbd>Alt</kbd>+click first types an arrow, and a held key repeats the arrow until the commit. It also cannot be undone — the host already saw the keystroke.</p>
+  <h3>Deferred commit (the design)</h3>
+  <p>Suppress the press, decide on release. The cost is that the held modifier only appears after the term, which is exactly why the term must be felt as a tap threshold (~200 ms) and why <em>any other key going down</em> must commit immediately — so <kbd>Alt</kbd>+<kbd>Tab</kbd> typed quickly still carries Alt from its first report.</p>
+</section>
+
+<section id="design">
+  <h2>The state machine</h2>
+  <pre class="pseudo">on press of a configured id:
+    if Fn flag set, or another key is already down, or slot busy:
+        emit the stock usage          # never delay a rollover or an Fn chord
+    else:
+        pending[id] = {t0 = now, tap, hold}
+        emit nothing
+
+every tick, for each pending slot:
+    if now - t0 >= TERM:
+        emit hold usage (press)
+        committed[id] = true
+
+on release of that id:
+    if committed[id]: emit hold usage (release)
+    else:             emit tap usage, then its release
+    clear the slot</pre>
+  <ul>
+    <li><strong>Term</strong> 200 ms for the arrows, one constant; 500 ms during the first bench run so the delay is obvious.</li>
+    <li><strong>Slots</strong> four pending records (id, t0, tap usage, hold usage, flags) in blank RAM; the id is already unique per key.</li>
+    <li><strong>Fail-open:</strong> a release without a slot, or a slot whose key is already released at commit time, emits the stock usage — a stuck modifier is the one failure mode that must not happen.</li>
+    <li><strong>Bypass:</strong> when the Fn flag is set the key keeps its Fn-layer behaviour (so Fn+arrow still recurses through the overlay, not around it).</li>
+    <li><strong>Tap emission</strong> is a press report and a release report; the host needs to see both, so they must not be merged into one report.</li>
+  </ul>
+</section>
+
+<section id="hook-sites">
+  <h2>Where it hooks — candidates, one still unconfirmed</h2>
+  <table>
+    <thead><tr><th>Site</th><th>What it sees</th><th>Use</th></tr></thead>
+    <tbody>
+      <tr><td><code>0x32AC</code> per-key state machine</td><td>id, value, actuation bit — both edges</td><td>Best place to start the timer and to detect the release; no other code is closer to the physical key.</td></tr>
+      <tr><td><code>0x1457E</code> dispatcher</td><td>the final usage in <code>[base+4]</code>, after catalog, remap, Fn overlay and the Mac modifier rewrite at <code>0x145C6</code></td><td>Best place to <em>suppress</em> the emit, and the only place that sees the value the host would have received.</td></tr>
+      <tr><td><code>0x5D28</code> event handler</td><td>catalog record and per-key 8-byte settings staged on the stack (<code>0x5D60</code>–<code>0x5D7C</code>)</td><td>Fallback if the state machine proves too hot: the same data is already gathered here.</td></tr>
+    </tbody>
+  </table>
+  <p>Open and load-bearing: where the <strong>release</strong> event reaches the dispatcher, and whether the state machine's actuation bit clears before or after the dispatcher runs. Both decide whether the patch is one branch or two, and the first flash should answer it without guessing.</p>
+</section>
+
+<section id="layout">
+  <h2>What the keys become</h2>
+  <table>
+    <thead><tr><th>Position (id)</th><th>Tap</th><th>Hold</th></tr></thead>
+    <tbody>
+      <tr><td>right Shift (<code>0x4B</code>)</td><td>Up Arrow</td><td>right Shift</td></tr>
+      <tr><td>Menu (<code>0x56</code>)</td><td>Left Arrow</td><td>Menu</td></tr>
+      <tr><td>right Ctrl (<code>0x57</code>)</td><td>Down Arrow</td><td>right Ctrl</td></tr>
+      <tr><td>right Alt (<code>0x54</code>)</td><td>Right Arrow</td><td>right Alt</td></tr>
+      <tr><td>Fn (<code>0x55</code>)</td><td>—</td><td>Fn (stock)</td></tr>
+    </tbody>
+  </table>
+  <p>This build starts from the <strong>stock catalog</strong>: right Alt returns to <code>0xE6</code>, Fn stays <code>0xAF</code> on its own key, and the previous bake's four modifier remaps are unnecessary. The Fn overlay row already proven on hardware (<code>0x16C7E</code> <code>4C 49</code> → <code>4F B9</code>, Right Arrow → Volume Up) is kept, so Fn+Right still works — now genuinely as a chord with the Fn key.</p>
+</section>
+
+<section id="cost">
+  <h2>Cost, risk and gates</h2>
+  <ul>
+    <li><strong>Code:</strong> roughly 250–350 bytes of Thumb in blank flash (<code>0x18600</code>–<code>0x7DFFC</code>, avoiding <code>0xAE10</code>–<code>0xAFFF</code> and <code>0xB000</code>–<code>0xBA00</code>), entered by one <code>bl</code> from an existing site; plus about 32 bytes of RAM.</li>
+    <li><strong>Flash cycles:</strong> 2–3 to land and tune it. Every write erases the NVM settings pages, so app-side remaps must be re-entered after each one.</li>
+    <li><strong>Gates unchanged:</strong> length preserved, edits above the version words, checksum recomputed tool-side, signature stale on a patched updater. No readback exists, so every test is a flash.</li>
+    <li><strong>Not addressed:</strong> the wireless dead window (RF link establishment, outside this image) and the fact that a held modifier arrives one term late.</li>
+    <li><strong>Failure budget:</strong> the state machine can only mis-time a modifier, never wedge one — every path that loses a slot emits the stock usage. That is the property to test first.</li>
+  </ul>
+</section>
+
+<section id="ladder">
+  <h2>Test ladder</h2>
+  <ol>
+    <li><strong>No-op hook:</strong> branch into new code that immediately returns the stock usage. Proves the <code>bl</code>, the placement and the flash without changing behaviour.</li>
+    <li><strong>One key, long term:</strong> right Ctrl only, 500 ms. Confirms the tick unit, the release edge and the tap emission.</li>
+    <li><strong>Four keys, 200 ms:</strong> the full table; confirms slot bookkeeping and rollover commit.</li>
+    <li><strong>Add Fn+Right:</strong> restore the proven overlay row and check the chord against the tap/hold keys.</li>
+  </ol>
+  <p>Each rung is one visible behaviour, so a failed write is diagnosable from the keyboard alone — no debugger, no readback.</p>
+</section>
+
+<section id="not-established">
+  <h2>Not established</h2>
+  <ul>
+    <li>The exact interception line (state machine vs dispatcher) and where the release edge arrives.</li>
+    <li>The tick's <code>step</code> byte value in the running device, so "200 ms" is a term in ticks until measured.</li>
+    <li>Whether a tap's press and release need two report intervals or one; the report assembler is not fully mapped.</li>
+    <li>The Mac mode rewrite at <code>0x145C6</code> swaps modifier usages, so a tap/hold key must be classified after it, not before.</li>
+    <li>Nothing here has been built or flashed; all addresses are read from the stock image.</li>
+  </ul>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="key-pipeline.html">Key pipeline &amp; remap surface</a> — the state machine, the catalog and the overlay this design hooks.</li>
+    <li><a href="fn2.html">A second Fn key</a> — the other new-code feature; same level, larger design.</li>
+    <li><a href="mod-surface.html">Modification surface</a> — the table-only bakes this replaces, and the Row 32 Volume Up edit it keeps.</li>
+    <li><a href="rebuild-vs-patch.html">Rebuild or patch</a> — why new code lands in blank flash and what that costs.</li>
+    <li><a href="../PLAN.html">Plan</a> — phase 6 stays gated; this page is a design, not a build.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

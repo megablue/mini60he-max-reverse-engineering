@@ -232,7 +232,7 @@ img{max-width:100%;height:auto}
 </tbody>
 </table>
 <h3>Tier C — small code constants (in place, 2–4 bytes)</h3>
-<p><strong>Snappier key feel:</strong> hysteresis <code>0x0C</code> at <code>0x3764</code>, commit delta <code>0x0A</code> at <code>0x54DE</code>, hold timer <code>0x1388</code> at <code>0x54A6</code>. This is the only genuine performance knob found, and also the easiest way to introduce chatter, so it needs a tuning ladder rather than a single write. <strong>Second Fn</strong> is already specced but is not small: it is the first patch that must add code (~60–120 bytes into blank flash, 2–4 days, 2–3 flashes) — see <a href="features/fn2.html">A second Fn key (Fn2)</a>.</p>
+<p><strong>Snappier key feel:</strong> hysteresis <code>0x0C</code> at <code>0x3764</code>, commit delta <code>0x0A</code> at <code>0x54DE</code>, hold timer <code>0x1388</code> at <code>0x54A6</code>. This is the only genuine performance knob found, and also the easiest way to introduce chatter, so it needs a tuning ladder rather than a single write. <strong>Second Fn</strong> is already specced but is not small: it is the first patch that must add code (~60–120 bytes into blank flash, 2–4 days, 2–3 flashes) — see <a href="features/fn2.html">A second Fn key (Fn2)</a>. <strong>Tap and hold</strong> (arrow on tap, stock modifier on hold) is the other new-code feature and the smaller one: ~300 bytes, four keys, and it removes the need for the modifier remaps entirely — see <a href="features/tap-hold.html">Tap and hold</a>.</p>
 <h3>Ruled out, and why</h3>
 <ul>
 <li><strong>Wireless dead window.</strong> The unresponsive seconds after a wireless wake cannot be in this image: a wired replug resets the MCU and is instant, so boot plus Hall calibration are sub-second; the delay is RF link establishment in the dongle/module, outside <code>0x7E000</code>.</li>
@@ -272,6 +272,7 @@ img{max-width:100%;height:auto}
 <li><strong>Repository:</strong> <code>git init</code> happened on 2026-10-22 (branch <code>main</code>, local only, nothing pushed); the scaffold was among the first commits. <code>analysis/out/</code> stays ignored, the vendor exe is committed, the licence is MIT for the analysis only.</li>
 <li><strong>Backlog written (2026-10-24):</strong> <a href="#backlog">Candidate modifications</a> ranks what is actually cheap — three no-flash items (one-command build, preflight guard, stock cheat sheet), four one-flash table edits led by baking settings into the image so a reflash stops wiping them, three small code constants, and the three things the image cannot reach (wireless, macros, readback). Nothing in it is committed work; the first entry has since been built.</li>
 <li><strong>One-command build landed (2026-10-24):</strong> <code>analysis/fw_build.py</code> turns requests into an image and a wrapped updater in one call — <code>KEY=TARGET</code> edits the catalog plus the pair row, <code>Fn+KEY=ACTION</code> spends a free Fn-overlay row — and asserts that the finished diff is exactly its own edit set. Acceptance test is hardware: the six requests that describe the flashed bake produce image <code>617eef7f…</code> and exe <code>774bb728…</code>, byte for byte what <code>fw_bake3.py</code> wrote. <code>analysis/fw_names.py</code> now holds the usage vocabulary it shares with <code>fw_remap.py</code>. Tier A entry 1 is closed.</li>
+<li><strong>Tap and hold specced (2026-10-24):</strong> <a href="features/tap-hold.html">Tap and hold</a> answers the lower-right-cluster request — arrow on tap, stock modifier on hold — and records why no table can express a duration, the deferred-commit state machine on the verified millisecond tick and per-key press/release state (~300 B, 4 keys, 32 B RAM), the three hook candidates (<code>0x32AC</code>, <code>0x1457E</code>, <code>0x5D28</code>), the test ladder, and the open release-edge question. Starting from the stock catalog means right Alt and the other three keys get their stock roles back; only the proven Fn+Right overlay row is kept.</li>
 </ul>
 </section>
 <section id="related">
@@ -282,6 +283,7 @@ img{max-width:100%;height:auto}
 <li><code>docs/features/index.html</code> — the map index; <code>docs/features/binary-evidence.html</code> holds the binary pin.</li>
 <li><code>docs/features/rebuild-vs-patch.html</code> - why the work is patching and how far a hook into blank flash can go.</li>
 <li><code>docs/features/fn2.html</code> - the second-Fn feasibility answer and the level-2-first ladder it prescribes.</li>
+<li><code>docs/features/tap-hold.html</code> - the tap-and-hold design (arrow on tap, modifier on hold) and the hook candidates it needs.</li>
 <li><code>HANDOFF.md</code> — the volatile session-state snapshot.</li>
 </ul>
 </section>

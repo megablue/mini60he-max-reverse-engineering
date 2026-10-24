@@ -266,6 +266,25 @@ computed-base store; reading the `[base+4]==0xAF` branch at `0x147C4` and the
 clear at `0x233C` should settle it in half a day to a day. Costs and the
 level-2-first ladder are in [A second Fn key (Fn2)](docs/features/fn2.html).
 
+Tap and hold specced (2026-10-24). The lower-right cluster can send an arrow when
+tapped and its stock modifier when held, and the design is now written down in
+[Tap and hold](docs/features/tap-hold.html). No table can express it — the catalog,
+the NVM record and the Fn overlay all map one key to one value chosen from the
+event, never from duration, and nothing in the image stores a press time. What the
+patch can lean on is verified: a millisecond SysTick counter (`0x3FE8`/`0x3F08`,
+`0x200004A8`), per-key press/release state with the actuation bit at
+`0x200031AE + id*2` in the state machine `0x32AC`, the single finished-usage point in
+the dispatcher at `0x1457E`, and modifier latching in the 8 bytes at `0x200000DE`.
+The design is deferred commit (~200 ms): suppress the press, emit the hold usage at
+the term or on any other key going down, emit the tap usage on early release — with
+the four slots and a fail-open rule that a lost slot emits the stock usage rather
+than wedging a modifier. Cost is ~300 bytes of Thumb in blank flash, 32 bytes of RAM
+and 2–3 flashes, so it stays behind the same phase-6 gate. Because it starts from
+the stock catalog, right Alt and the other three keys get their stock roles back;
+only the hardware-proven Fn+Right overlay row (`0x16C7E`, Vol+) is kept. Open and
+load-bearing: where the release edge reaches the dispatcher, and the tick's step
+value, which is why the ladder starts with a 500 ms single-key run.
+
 ## Open threads
 
 - The old misspelled sibling folder was removed on 2026-10-22; only this
