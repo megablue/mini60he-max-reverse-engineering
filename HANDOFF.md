@@ -428,3 +428,10 @@ added `analysis/fw_code.py` to the sequence. Before publishing, the README
 gained the flashing warning the earlier "revisit if pushed" note asked for: no
 readback, the settings pages are erased by a write, an interrupted write has no
 proven recovery.
+
+The release `v1.52-remap` was re-cut on 2026-10-26: same tag, all four assets
+replaced, title and notes rewritten. It now ships the clean-bake build (image
+`ecb236fb…`, exe `0a61d1e7…`) — arrow cluster, `Fn`+Right = Volume Up,
+`Fn`+Left = Volume Down, and the wireless wake fix. The notes no longer claim the
+wake window is unfixable, and they record the hardware verification that preceded
+the upload.
