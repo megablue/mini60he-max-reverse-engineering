@@ -123,6 +123,10 @@ image and a wrapped updater out, with the finished diff asserted against its own
 edit set; <code>fw_names.py</code> holds the usage vocabulary both of them share.
 <code>fw_bake3.py</code> and <code>fw_volpatch.py</code> are the earlier
 hand-written bakes and stay as the record of what was flashed.
+<code>fw_deadwin.py</code> is the first build that adds code rather than data:
+a four-byte hook at the report funnel <code>0x127E0</code> plus a 64-byte stub
+in blank flash that drops keys for two seconds after a wireless wake
+(<code>out/fw_deadwin*</code>, <code>out/fw_deadwin_remap*</code>).
 </li>
 <li>Analysis artifacts (disassemblies, unpacked payloads, scratch tooling,
 reports) get top-level directories when created, each with a bullet here in

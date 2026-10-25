@@ -61,3 +61,21 @@ jobs:
               print(name, got)
               assert got == want, f"{name} does not reproduce the flashed bake"
           PY
+
+      - name: Rebuild the wireless dead window and pin both images
+        run: |
+          python analysis/fw_deadwin.py --no-exe --name ci_deadwin
+          python analysis/fw_deadwin.py --base analysis/out/ci_bake.bin --no-exe --name ci_deadwin_remap
+          python - <<'PY'
+          import hashlib, pathlib
+          for name, want in (
+                  ("ci_deadwin.bin", "2a26756ae32525e10c0a92b950728ab8d983c0bae856b0e34ff7f3ddcd745d08"),
+                  ("ci_deadwin_remap.bin", "4dd3201cae72e7d4974731d9c300797255236399ea014479467a4261e0f3d4bb")):
+              got = hashlib.sha256(pathlib.Path("analysis/out", name).read_bytes()).hexdigest()
+              print(name, got)
+              assert got == want, f"{name} does not reproduce the dead-window build"
+          img = pathlib.Path("analysis/out/ci_deadwin.bin").read_bytes()
+          assert img[0x127E0:0x127E4] == bytes.fromhex("0df00ebc"), "hook changed"
+          assert img[0x20000:0x20004] == bytes.fromhex("2de9f05f"), "stub changed"
+          assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
+          PY

@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="author" content="megablue">
+<meta name="generator" content="opencode-feature-map">
+<title>The wireless dead window — drop the first 2 s of keys after a wake</title>
+<style>
+body{margin:0 auto;max-width:60rem;padding:2rem 1.25rem 4rem;font:16px/1.6 system-ui,-apple-system,Segoe UI,sans-serif;color:#1d2433;background:#fff}
+h1{border-bottom:2px solid #d8dee9;padding-bottom:.4rem}h2{margin-top:2rem}code{background:#f4f6fa;padding:.1em .3rem;border-radius:.25rem}
+pre{background:#f4f6fa;border:1px solid #d8dee9;border-radius:.4rem;padding:.8rem 1rem;overflow:auto}
+pre.verbatim{border-left:4px solid #8a5a00}pre.pseudo{border-left:4px solid #0b6e99}pre.mermaid{border:1px dashed #d8dee9}
+table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding:.4rem .6rem;text-align:left;vertical-align:top}th{background:#f4f6fa}
+@media (prefers-color-scheme:dark){body{background:#11151c;color:#e6eaf2}code,pre,th{background:#1a202a}pre,th,td{border-color:#2b3342}}
+</style>
+</head>
+<body>
+<article class="map page">
+<h1>The wireless dead window — drop the first 2 s of keys after a wake</h1>
+<p class="status">Status: design + builder (2026-10-24) — the patch is built in <code>analysis/fw_deadwin.py</code> and has never been flashed; the funnel, the tick and the free space are verified, the wake edge is our own heuristic (a 30 s key gap) because the firmware's link-ready path cannot be armed safely — it may run on every frame · Read when: the first presses after a wireless wake arrive with the wrong (factory) binding, planning a wireless-only gate, or asking where a key can be dropped before it reaches the host</p>
+
+<section id="what-it-is">
+  <h2>What it is</h2>
+  <p>The report from hardware, in three rounds:</p>
+  <ul>
+    <li><strong>Wireless only.</strong> Wired replug and a wired mode switch are immediate. In 2.4G and in Bluetooth there is a window of about <strong>2 s</strong> after a wake from idle.</li>
+    <li><strong>It is not a dead window.</strong> A press inside it <em>does</em> reach the host, with the key's <strong>factory</strong> binding. The macro key sends CapsLock (its factory usage), so one press leaves the host's caps state toggled.</li>
+    <li><strong>After the window the configured macro works.</strong> The same key never sends CapsLock again until the next wake.</li>
+  </ul>
+  <p>The request: <strong>make the window real</strong> — throw the presses away instead of sending the wrong thing, for about 2 s, and only while the keyboard is wireless.</p>
+</section>
+
+<section id="why-it-happens">
+  <h2>Why the wrong binding appears</h2>
+  <p>The key handler stages a binding in two steps, and both are in the image:</p>
+  <ul>
+    <li><strong>Factory first.</strong> <code>0x5A00</code> looks the scan position up in <code>0x16B3E</code> (position → factory usage) and writes that usage to the output slot <code>0x2000008C</code> at <code>0x5A22</code>, <em>before</em> it applies the per-key record. For the macro key that byte is <code>0x39</code>, CapsLock.</li>
+    <li><strong>Configured second.</strong> The per-key record lives in RAM (<code>0x200024AE</code> catalog, <code>0x200028AE</code> settings). Wirelessly it is filled by the RF settings channel: <code>0x10058</code> handles module frames <code>0x23</code> and writes flash tables <code>0x9000</code>/<code>0x9600</code>/<code>0xB000</code>/<code>0xB600</code> plus their RAM mirrors.</li>
+  </ul>
+  <p>So a press that lands <em>before the channel has delivered the user's records</em> takes the factory path — and the firmware's own link indicator agrees: the module handshake declares the link ready by writing lighting state <code>0x4B</code> at <code>0x1EB2</code>, and only then does the configured effect return.</p>
+  <p>That also disposes of the earlier "it is a hardware CapsLock flag" idea: the image has no caps flag at all, CapsLock is just usage <code>0x39</code> in the catalog record of id <code>0x30</code>.</p>
+</section>
+
+<section id="where-to-cut">
+  <h2>Where a press can be dropped</h2>
+  <p><code>0x127E0</code> is the single action-byte → HID converter: it is where a usage is written into the report buffers (modifier byte <code>0x200000DE</code>, consumer slot, 128-bit bitmap <code>0x20002144</code>) and where the "report changed" flags are set. Every emission passes it:</p>
+  <ul>
+    <li>the final-usage dispatcher tail-branches to it at <code>0x147F8</code> (<code>b.w 0x127E0</code>) — the path a plain key takes;</li>
+    <li>the modifier/Fn kinds call it from <code>0x5A00</code> (<code>0x5B82</code>, <code>0x5B9C</code>, <code>0x5BEA</code>, <code>0x5C4A</code>, <code>0x5C58</code>).</li>
+  </ul>
+  <p>The report is assembled later from those buffers: <code>0x15FC</code> folds them and clears them, then hands off to the USB task at <code>0x10768</code>. If nothing is staged, the fold sees nothing and the report carries no key. Returning early from the converter is therefore a clean drop, and the caller cannot tell the difference.</p>
+  <p>Its first instruction is a 4-byte <code>push.w</code> — one whole instruction — so the entry can be replaced by a 4-byte branch with nothing left over, and the stub can replay the push.</p>
+</section>
+
+<section id="how-wake-is-detected">
+  <h2>How a wake is detected</h2>
+  <p><strong>Wireless is free:</strong> the mode object at <code>0x20000378</code> holds <code>0</code> for wired and <code>1</code>/<code>2</code> for 2.4G/BT, written by the two-pin debouncer <code>0x107B8</code>. No new detection is needed.</p>
+  <p><strong>A wake edge is not free.</strong> The candidates all carry a re-arm risk:</p>
+  <table>
+    <thead><tr><th>Candidate</th><th>Why it was not chosen</th></tr></thead>
+    <tbody>
+      <tr><td>mode debouncer <code>0x107B8</code>, stable-change bank</td><td>A genuine edge, but it fires on a wired↔wireless switch only — not on an idle wake, which is the reported symptom.</td></tr>
+      <tr><td>link-ready block <code>0x1EAE</code> / lighting <code>0x4B</code></td><td>Inside the module reply handler. It may run on every reply; arming there could re-arm forever and mute the keyboard. Not provable statically.</td></tr>
+      <tr><td>link countdown <code>0x200003B0</code></td><td>Only one static reader (<code>0x1848</code>) and no static writer — its edge cannot be trusted.</td></tr>
+    </tbody>
+  </table>
+  <p><strong>Chosen: our own idle edge.</strong> The stub keeps two dwords, <em>last key</em> and <em>armed</em>. In wireless mode, if the gap since the last key is at least <strong>30 s</strong>, that press <em>is</em> the wake: arm the timer at "now" and drop the press. Suppress while "now − armed &lt; 2000 ms". Wired mode does not touch the state at all, so switching from wired also arms on the first wireless press.</p>
+  <p>This is a heuristic, and it is honest about it: it cannot tell a wake from a 30 s pause. The cost of being wrong is one dropped key plus 2 s of dropped keys after a long pause; the cost of the alternative is a keyboard that can mute itself. It is also self-limiting — an expired timer cannot stay armed, and there is no latch to get stuck.</p>
+</section>
+
+<section id="the-patch">
+  <h2>The patch</h2>
+  <p>Two sites, 68 bytes total: the hook at <code>0x127E0</code> (replacing the stock <code>push.w</code>) and a 64-byte stub in the blank band at <code>0x20000</code>. The stub is hand-assembled and asserted by disassembly in the builder.</p>
+<h3>The bytes</h3>
+<pre class="verbatim" data-why="exact machine code and bytes; every byte is asserted by the builder">
+0x127E0: b.w   0x20000              0d f0 0e bc   ; was 2d e9 f0 5f (push.w)
+
+0x20000: push.w {r4-r11, ip, lr}    2d e9 f0 5f   ; replay the displaced instruction
+0x20004: ldr    r0, [pc, #0x2c]     0b 48         ; r0 = 0x20000378 mode object
+0x20006: ldrb   r0, [r0]            00 78         ; 0 wired, 1/2 wireless
+0x20008: cbz    r0, 0x20030         90 b1         ; wired -> stock behaviour
+0x2000a: ldr    r1, [pc, #0x2c]     0b 49         ; r1 = 0x200004A8
+0x2000c: ldr    r2, [r1]            0a 68         ; r2 = now (ms)
+0x2000e: ldr    r3, [pc, #0x2c]     0b 4b         ; r3 = 0x20000610 state
+0x20010: ldr    r4, [r3]            1c 68         ; r4 = last key (ms)
+0x20012: subs   r4, r2, r4          14 1b         ; gap
+0x20014: movw   ip, #30000          47 f2 30 5c
+0x20018: cmp    r4, ip              64 45
+0x2001a: blo    0x2001e             00 d3         ; gap < 30 s: no re-arm
+0x2001c: str    r2, [r3, #4]        5a 60         ; armed = now
+0x2001e: str    r2, [r3]            1a 60         ; last = now
+0x20020: ldr    r0, [r3, #4]        58 68         ; armed
+0x20022: subs   r0, r2, r0          10 1a         ; elapsed
+0x20024: movw   ip, #2000           40 f2 d0 7c
+0x20028: cmp    r0, ip              60 45
+0x2002a: bhi    0x20030             01 d8         ; older than 2 s: pass
+0x2002c: pop.w  {r4-r11, ip, pc}    bd e8 f0 9f   ; drop: return, nothing staged
+0x20030: b.w    0x127e4             f2 f7 d8 bb   ; continue the stock body
+0x20034: .word  0x20000378          78 03 00 20
+0x20038: .word  0x200004A8          a8 04 00 20
+0x2003c: .word  0x20000610          10 06 00 20
+</pre>
+  <h3>State, time base and builds</h3>
+  <p><strong>State:</strong> two dwords at <code>0x20000610</code> (last key, armed). That address sits in a 0x1EC-byte hole between <code>0x2000060C</code> and <code>0x200007F9</code>: no literal anywhere in the image names it, and an effective-address scan of the whole code region finds no load or store in <code>0x20000600..0x20000800</code>. The builder re-runs that scan over its window and refuses a candidate that is referenced.</p>
+  <p><strong>Built (2026-10-24, not flashed):</strong> on the stock image, <code>out/fw_deadwin.bin</code> <code>2a26756a…</code> and <code>out/fw_deadwin.exe</code> <code>4cbf3097…</code>; on top of the arrow-cluster bake, <code>out/fw_deadwin_remap.bin</code> <code>4dd3201c…</code> and <code>.exe</code> <code>7dd6a392…</code>. <code>--window</code> and <code>--idle</code> retune the two immediates; every other byte of the stub is asserted against the disassembly above.</p>
+  <p><strong>Time base:</strong> the SysTick handler <code>0x3FE8</code> adds the step byte to <code>0x200004A8</code>, and the reload at <code>0x4044</code> divides the core clock by <code>1000/step</code> — so that counter is milliseconds by construction, whatever the step is.</p>
+</section>
+
+<section id="costs">
+  <h2>What it costs</h2>
+  <ul>
+    <li><strong>One flash.</strong> New code, so it needs a write; every write erases the NVM settings pages, so app-side remaps are re-entered afterwards.</li>
+    <li><strong>A heuristic window.</strong> A 30 s pause followed by a key is treated as a wake: that key and the next 2 s are dropped. Both constants are two immediates in the stub (<code>0x7530</code> and <code>0x7d0</code>) and can be retuned without touching anything else.</li>
+    <li><strong>No macro, no config, no radio work.</strong> It hides the wrong binding; it does not stop the replay, shorten it, or teach the keyboard to hold keys until the config is ready. That larger fix would need the config-ready signal this page could not pin.</li>
+    <li><strong>Wired is untouched</strong> — byte for byte the same path, because the first branch leaves when the mode byte is <code>0</code>.</li>
+  </ul>
+</section>
+
+<section id="gates">
+  <h2>Gates</h2>
+  <ul>
+    <li><strong>Length preserved:</strong> the image stays <code>0x7E000</code>; the tool's RCDATA size gate sees exactly what it saw in the stock flow.</li>
+    <li><strong>Checksum:</strong> computed tool-side from the loaded file (<code>0x40A7D0</code>/<code>0x40A800</code>), so nothing to patch.</li>
+    <li><strong>Version word:</strong> <code>0x127E0</code> was a valid function prologue and <code>0x20000</code> was zero fill, so neither can be the dword the gate compares with the device's version — and a mismatch is a refusal before erase, not a brick.</li>
+    <li><strong>No readback:</strong> there is still no way to dump the device, so every test is a flash; keep the unmodified updater as the revert path.</li>
+  </ul>
+</section>
+
+<section id="ladder">
+  <h2>Test ladder</h2>
+  <ol>
+    <li><strong>Wired first.</strong> Type, chord, macro: nothing may change. This proves the branch out and the replay of the push.</li>
+    <li><strong>Wireless, one key after 30 s idle.</strong> The first press must do <em>nothing</em>; the host must not see CapsLock.</li>
+    <li><strong>Wireless, type immediately after that.</strong> Keys inside the 2 s are dropped; the first key after 2 s works, with the configured macro.</li>
+    <li><strong>Wireless, continuous typing.</strong> Gaps under 30 s must never arm: no key may disappear mid-sentence.</li>
+    <li><strong>Wired→wireless switch after a pause.</strong> The first press is dropped (the last wireless press was more than 30 s ago), then normal.</li>
+  </ol>
+</section>
+
+<section id="not-established">
+  <h2>Not established</h2>
+  <ul>
+    <li>Where exactly the firmware's own wake window opens and closes: the reply handler's ready path (<code>0x1EAE</code>, lighting <code>0x4B</code>) is the best static candidate, but its call frequency is not proven, so the patch does not hook it.</li>
+    <li>Whether the apply window is really 2 s in every configuration (2.4G vs BT, dongle vs host) — the constant is the user's measurement, not a firmware value.</li>
+    <li>Whether the idle gap that matters is the link's or the host's; 30 s is a guess that has to be tested against the keyboard's actual sleep timeout.</li>
+    <li>What the host sees for a suppressed press: nothing is staged, but the report cycle still runs; a stale report is possible in principle, not observed.</li>
+    <li>Nothing here is flashed. The built artefacts are under <code>analysis/out/</code>.</li>
+  </ul>
+</section>
+
+<section id="related">
+  <h2>Related</h2>
+  <ul>
+    <li><a href="key-pipeline.html">Key pipeline &amp; remap surface</a> — the handler <code>0x5A00</code>, the factory table <code>0x16B3E</code> and the dispatcher the hook sits behind.</li>
+    <li><a href="fw-image.html">Firmware image</a> — the blank band at <code>0x20000</code>, the vector table and the region map.</li>
+    <li><a href="mod-surface.html">Modification surface</a> — the table-only bakes; this page is the first patch that adds code.</li>
+    <li><a href="tap-hold.html">Tap and hold</a> — the other new-code design, and the same funnel question from the other side.</li>
+    <li><a href="rebuild-vs-patch.html">Rebuild or patch</a> — why new code goes into blank flash, and what a flash costs.</li>
+    <li><a href="../PLAN.html">Plan</a> — phase 6 stays gated; the ladder above is the user's runbook.</li>
+  </ul>
+</section>
+</article>
+</body>
+</html>

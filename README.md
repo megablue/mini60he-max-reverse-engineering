@@ -295,6 +295,7 @@ transcripts and the built installers land, and every one of them is reproducible
 | `fw_remap.py` | remap **planner**: resolves `key -> key`, validates, prints both byte edits (pair table + catalog) |
 | `fw_build.py` | remap **builder**: requests -> image -> patched updater, with the diff asserted |
 | `fw_names.py` | the shared usage vocabulary (HID names + aliases such as `Fn`, `RightArrow`, `Bksp`) |
+| `fw_deadwin.py` | the first code patch: hooks the report funnel `0x127E0`, adds a 64-byte stub that drops keys for 2 s after a wireless wake |
 | `fw_bake3.py` | builds the earlier hand-written bake: applies the edit list, asserts anchors, wraps the exe |
 | `mkflasher.py` | generic wrapper: any `0x7E000` image -> patched updater + manifest |
 | `isp_*.py` | ISP protocol: frame format, `AA 55` command table, password payload, upload flow, gates |
@@ -321,6 +322,7 @@ The feature map is the entry point: **`docs/features/index.html`**.
 | `rebuild-vs-patch.html` | whether a rebuild is possible, and how far a hook into blank flash reaches |
 | `fn2.html` | a second Fn-like modifier: the dead layer 2, the momentary design, its gate and costs |
 | `tap-hold.html` | arrow on tap, modifier on hold: why no table can do it, the deferred-commit design and its hook candidates |
+| `dead-window.html` | the wireless wake window: the report funnel, the idle-edge design, the first patch that adds code |
 
 `docs/SPEC.html` states behaviour (typing, actuation, lighting, settings, updating);
 `docs/PLAN.html` holds the phases, the fences and the first-patch recipe.
