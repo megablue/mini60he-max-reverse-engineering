@@ -27,8 +27,33 @@ So the next build is an experiment, not a fix: `analysis/fw_deadwin_probe.py` ke
 the hook and the timer and throws the drop away, writing a letter into the action
 byte `0x2000008C` instead — `a` = mode byte says wired, `q` = wireless and inside
 the window, `w` = wireless and past it. 88-byte stub, image `21223c42…`, exe
-`bf2c662d…`, built and not flashed. Whichever letter appears names the gate that
-is lying. Docs: [The wireless dead window](docs/features/dead-window.html#marker).
+`bf2c662d…`. **It was flashed and it silenced the keyboard**: lighting still
+reacted per press, the host received nothing, because writing the action byte at
+the funnel entry wedges the staged pipeline the probe was meant to watch. Reflashing
+the drop build (`7dd6a392…`) restored normal typing, which also proves the hook and
+the stub prologue execute — the drop branch simply never matched. The marker idea is
+retired. Docs: [The wireless dead window](docs/features/dead-window.html#marker).
+
+Static follow-up then retired three of the four explanations: the millisecond tick
+cannot freeze (one feeder, SysTick set once with `CSR=7`, no `wfi` in the poll
+block), nothing writes the mode byte on link state (four writers, all switch or
+2.4G-entry), and the only self-reset is the HardFault path. What remains is the wake
+itself: both our remembered press time and the tick are `0` after a boot, so a
+`now - last >= 30 s` test reads `0` and can never arm. `analysis/fw_bootwin.py` is
+the third build — same hook, a 52-byte stub, predicate **`mode != 0 and 0 < now <=
+2500 ms`**, no state at all, so a reboot cannot hide from it, and `now == 0` passes
+so a stopped clock cannot mute the keyboard. Image `9c4aa001…`, exe `5046b698…`, on
+top of the arrow bake, not flashed. A silent ~2 s after a wake confirms the reboot
+theory; immediate typing with CapsLock means the counter does not restart and the
+window is elsewhere. Docs:
+[the boot-window build](docs/features/dead-window.html#boot-window).
+
+New to the mechanism: the per-key tables are rebuilt by `0x59F0`, whose only callers
+are `0x6BE6` and the link re-init `0x6EB8` (`0x6F16`) — the rebuild belongs to
+link-up, not to boot. The user's own tests show the configuration itself lives in
+MCU flash (it survives a dongle power cycle and a keyboard power cycle), so the
+window is not lost configuration; it is the table in RAM not being the user's yet
+when the first press arrives.
 
 There is now one command from "I want this key to do that" to a flashable
 installer: `analysis/fw_build.py`. `KEY=TARGET` rewrites the catalog byte that a

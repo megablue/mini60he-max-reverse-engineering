@@ -96,3 +96,22 @@ jobs:
           assert img[0x20048:0x20058] == bytes.fromhex("8c00002078030020a804002010060020"), "literals changed"
           assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
           PY
+
+      - name: Rebuild the boot-window build and pin it
+        run: |
+          python analysis/fw_bootwin.py --base analysis/out/ci_bake.bin --no-exe --name ci_bootwin
+          python - <<'PY'
+          import hashlib, pathlib
+          want = "9c4aa001be8f77ca8ce6e6648ef61513afd2d98cfb0074c472cdaff2d11feee7"
+          got = hashlib.sha256(pathlib.Path("analysis/out/ci_bootwin.bin").read_bytes()).hexdigest()
+          print("ci_bootwin.bin", got)
+          assert got == want, "the boot-window build does not reproduce"
+          img = pathlib.Path("analysis/out/ci_bootwin.bin").read_bytes()
+          assert img[0x127E0:0x127E4] == bytes.fromhex("0df00ebc"), "hook changed"
+          assert img[0x20000:0x20020] == bytes.fromhex(
+              "2de9f05f06480078002811d005490a68002a0dd040f6c41c624509d8bde8f09f"), "stub code changed"
+          assert img[0x20020:0x20028] == bytes.fromhex("78030020a8040020"), "literals changed"
+          assert img[0x20028:0x20030] == bytes.fromhex("00bf00bf00bf00bf"), "pad changed"
+          assert img[0x20030:0x20034] == bytes.fromhex("f2f7d8bb"), "pass branch changed"
+          assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
+          PY

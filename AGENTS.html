@@ -130,7 +130,11 @@ in blank flash that drops keys for two seconds after a wireless wake
 <code>fw_deadwin_probe.py</code> is its diagnostic twin: the same hook and timer,
 but it reports instead of dropping, writing <code>a</code>/<code>q</code>/<code>w</code>
 into the action byte so the device says which input lied
-(<code>out/fw_deadwin_probe*</code>).
+(<code>out/fw_deadwin_probe*</code>; flashing it silenced the keyboard, so the
+marker idea is retired).
+<code>fw_bootwin.py</code> replaces the idle-gap predicate with an uptime one
+(drop wireless keys while <code>0 &lt; now &le; 2500 ms</code>), which is the
+predicate a reboot cannot hide from (<code>out/fw_bootwin_remap*</code>).
 </li>
 <li>Analysis artifacts (disassemblies, unpacked payloads, scratch tooling,
 reports) get top-level directories when created, each with a bullet here in
