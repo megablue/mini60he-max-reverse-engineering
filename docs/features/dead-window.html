@@ -325,6 +325,19 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
   <p>Failure modes stay quiet: no special record within 300 ms → nothing is typed, exactly as today; <code>sl</code> or the internal gate declining the macro → the staged usage is already <code>0x00</code>, so still nothing. The one structural risk is context: the handler normally runs from the scan IRQ, and here it is called from the main loop, so a real key press could interleave in the window between the restored event and the call.</p>
   <p><strong>Result: still silent (2026-10-26, flashed).</strong> The first press after a wake still does nothing and the macro runs from the second press. So the capture almost certainly never ran — which points at the first event <em>not</em> carrying an empty record. That matters, because the old CapsLock may have been the staged byte (<code>0x2000008C</code>) sent downstream after the handler returned, not an emit inside <code>0x5E80</code> at all.</p>
   <p>One byte separates those two: put the factory usage back at <code>0x16B50</code> and leave everything else (the exit at <code>0x5E80</code>, the removed bail) exactly as the release has it. If CapsLock returns, the staged byte is emitted downstream and the capture belongs before <code>0x5D4A</code>; if it stays silent, <code>0x5E80</code> is the emitter and the replay failed for another reason. That probe is <code>analysis/fw_emitprobe.py</code> (<code>c107cf76…</code> / <code>6d098fbe…</code>).</p>
+  <p><strong>Result: CapsLock came back (2026-10-26).</strong> So the staged byte is emitted downstream, and nothing at <code>0x5E80</code> could ever have affected it. Together with the capture never firing, that says the macro key's record is a macro kind and its handler is <code>0x5A00</code>, not <code>0x5D28</code> — and <code>0x5A00</code> has the same factory staging at <code>0x5A22</code> plus an inner gate of its own.</p>
+  <h3>The inner gate in 0x5A00</h3>
+  <pre class="verbatim" data-why="the exact bytes of the inner gate">
+0x5AA2  ldrb r2,[r2]        ; per-key byte in the settings page 0xB000
+0x5AA4  cbz  r2, 0x5AAE     ; no settings -> the arming path
+0x5AA6  ldr  r2,=0x2000008F
+0x5AA8  ldrb r2,[r2]
+0x5AAA  cmp  r2,#0
+0x5AAC  bne  0x5B18         ; a configured key is DIVERTED while 0x8F is set
+0x5AAE  ...                 ; arming path
+</pre>
+  <p>A key with settings is diverted whenever <code>0x2000008F</code> is non-zero, and the diverted path never arms the macro; the staged factory byte then goes out downstream. That is the observed behaviour, and it also explains why the <em>dispatcher</em> gate probe changed nothing: that gate sits earlier and both branches end here.</p>
+  <p><strong>Built (2026-10-26, probe):</strong> <code>analysis/fw_armgate.py</code> → <code>0x5AAC</code> <code>34 d1</code> → <code>00 bf</code> (drop the diversion), image <code>c63367bf…</code>, exe <code>d9347ace…</code>. If the macro runs on the first press after a wake, this gate was the cause. When <code>0x2000008F</code> is zero nothing changes at all, so wired behaviour is untouched.</p>
 </section>
 
 <section id="not-established">

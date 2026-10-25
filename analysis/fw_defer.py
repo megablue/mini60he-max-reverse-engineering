@@ -220,9 +220,7 @@ def build() -> tuple[bytes, dict[str, int]]:
     s.raw("9200")                     # lsls r2,r2,#2
     s.ldr(3, "rec")
     s.raw("9a5c")                     # ldrb r2,[r3,r2]     kind
-    s.raw("093a")                     # subs r2,#9
-    s.raw("032a")                     # cmp  r2,#3
-    s.bcond("bls", "poll_ready")      # 9..0xC = a configured special record
+    s.cbnz(2, "poll_ready")           # any loaded record -> replay now
     s.ldr(2, "now")
     s.raw("1268")                     # ldr r2,[r2]
     s.raw("4368")                     # ldr r3,[r0,#4]      stamp
