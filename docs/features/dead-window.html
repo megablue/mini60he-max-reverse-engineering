@@ -292,6 +292,20 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
     </tbody>
   </table>
   <p>Route 1 is now the cheapest and the most direct: the gate is the thing that decides whether a macro key is treated as a macro, so if it can be put in the right state at wake, no new state machine is needed. The remaining unknown is its writer, which is a single targeted scan rather than a design.</p>
+  <h3>The writer is indirect — so probe the gate instead</h3>
+  <p>Three sweeps found no writer for <code>0x2000008F</code>: literal-based stores to every <code>0x200000xx</code> base, taint-tracked <code>add</code>/<code>mov</code> up to offset <code>7</code>, and calls whose argument points into the block. Nothing. It is written indirectly (or by a structure copy), the same wall <code>0x5b1d6c</code> hit.</p>
+  <p>So the gate is tested directly instead, with two bytes: force the kind dispatch unconditionally and see whether the first press runs the macro.</p>
+  <pre class="verbatim" data-why="the exact two bytes of the probe">
+0x37E6  18 B1   cbz r0, 0x37F0     before
+0x37E6  03 E0   b   0x37F0         after (record kind always decides the handler)
+</pre>
+  <p><strong>Built (2026-10-26, probe):</strong> <code>analysis/fw_gate.py</code> → <code>out/fw_gate.bin</code> <code>382eea5a…</code> and <code>out/fw_gate.exe</code> <code>69885973…</code>, on top of the released image (<code>ecb236fb…</code>), 2 bytes. Read it in this order:</p>
+  <ul>
+    <li>wired: <code>Fn</code>+Right, <code>Fn</code>+Left, <code>Fn</code>+1 and the macro all unchanged → the gate is safe to ignore;</li>
+    <li>wired: any of those changes → the gate has a purpose and this route stops;</li>
+    <li>wireless wake with the macro key runs the macro → the gate was the first-press cause;</li>
+    <li>wireless still types CapsLock or nothing → the gate is not the cause.</li>
+  </ul>
 </section>
 
 <section id="not-established">
