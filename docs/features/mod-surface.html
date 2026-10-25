@@ -100,6 +100,11 @@ BA    EA 00   Volume Down   table
 0x16C7E  4C 49   row 32: Insert -> Delete             before
 0x16C7E  4F B9   row 32: Right Arrow -> Volume Up     after
 </pre>
+  <p>Row 1 spends the same way for the second chord: it was keyed on <code>F1</code> (<code>0x3A</code>), which nothing on this board emits, and now carries the Left Arrow usage the Menu key sends (<code>0x50</code>):</p>
+  <pre class="verbatim" data-why="the exact two bytes added by the 2026-10-26 release build">
+0x16C40  3A C1   row 1: F1 -> Next                     before
+0x16C40  50 BA   row 1: Left Arrow -> Volume Down      after
+</pre>
   <ul>
     <li><strong>No length change, no relocation.</strong> Row count at <code>0x16CA4</code> stays 51 and every byte below <code>0x16A96</code> is untouched, so the version gate and the RCDATA size gate see a factory-shaped image.</li>
     <li><strong>Volume already ships.</strong> Rows 11/12 map <code>F11</code>/<code>F12</code> to <code>0xBA</code>/<code>0xB9</code>, so <code>Fn+F11</code> and <code>Fn+F12</code> are Volume Down/Up on stock firmware — a free check of the whole chain before any write.</li>

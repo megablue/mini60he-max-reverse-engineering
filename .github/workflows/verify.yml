@@ -150,3 +150,23 @@ jobs:
           assert img[0x5E80:0x5E84] == bytes.fromhex("00f010b8"), "empty branch not redirected"
           assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
           PY
+
+      - name: Rebuild the release build and pin it
+        run: |
+          python analysis/fw_fallback.py --base analysis/out/ci_bake.bin --fn-row Left=VolDown --no-exe --name ci_release
+          python - <<'PY'
+          import hashlib, pathlib
+          want = "ecb236fb447298891582426603b880288e3994119cdabf0b20dded8a465db517"
+          got = hashlib.sha256(pathlib.Path("analysis/out/ci_release.bin").read_bytes()).hexdigest()
+          print("ci_release.bin", got)
+          assert got == want, "the release build does not reproduce"
+          img = pathlib.Path("analysis/out/ci_release.bin").read_bytes()
+          assert img[0x16C40:0x16C42] == bytes.fromhex("50ba"), "Fn row 1 is not Fn+Left=VolDown"
+          assert img[0x16C7E:0x16C80] == bytes.fromhex("4fb9"), "Fn+Right was disturbed"
+          assert img[0x16B50] == 0x00, "position 18 still stages a factory usage"
+          assert img[0x5D54:0x5D5A] == bytes.fromhex("00bf00bf00bf"), "bail not removed"
+          assert img[0x5E80:0x5E84] == bytes.fromhex("00f010b8"), "empty branch not redirected"
+          assert img[0x127E0:0x127E4] == bytes.fromhex("2de9f05f"), "an inherited hook is present"
+          assert img[0x20000:0x20004] == bytes.fromhex("00000000"), "stub band is not blank"
+          assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
+          PY

@@ -365,6 +365,19 @@ exit. Nine bytes, no clock, no state; the cost is that Fn + that key no longer
 passes CapsLock through. Image `8dcf93e3…`, exe `bd419289…`, built on the image the
 keyboard runs now (`4dd3201c…`). Not flashed.
 
+**2026-10-26: the leak is gone, and the release build removes a bug we shipped.**
+The nine-byte fallback removal was flashed on 2026-10-25 and it works: waking with
+the macro key types nothing, the next press runs the macro. The same flash exposed
+a self-inflicted fault — every build had been layered on "the image the device
+runs" to preserve the arrow cluster, so the *first* build's 30 s / 2 s idle dropper
+travelled with them. It never saw the wake leak (that path skips the funnel) but it
+did see ordinary typing, which is why wireless keys went dead for two seconds after
+any 30 s pause. The release build starts from the clean `bake3` (`617eef7f…`) and
+carries one new Fn row: `0x16C40` `3a c1 -> 50 ba`, i.e. `Fn` + Left = Volume Down.
+Image `ecb236fb…`, exe `0a61d1e7…`, 23 bytes below stock, no hook, blank stub band.
+`fw_fallback.py` now refuses any base whose `0x127E0` is not the stock `push.w`
+unless `--allow-hook` is passed, so an inherited code patch cannot ride along again.
+
 ## Open threads
 
 - The old misspelled sibling folder was removed on 2026-10-22; only this

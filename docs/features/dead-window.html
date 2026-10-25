@@ -18,7 +18,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <body>
 <article class="map page">
 <h1>The wireless dead window — drop the first 2 s of keys after a wake</h1>
-<p class="status">Status: five builds written, none has stopped the leak (2026-10-25) — the idle-gap and uptime drops were inert, the marker build killed typing and was rolled back, and the funnel guard was flashed and still let CapsLock through; the leak is now pinned to the <em>empty per-key record</em> branch of the key handler and the latest build deletes that fallback instead of timing it (<a href="#fallback">removing the fallback</a>) · Read when: the first presses after a wireless wake arrive with the wrong (factory) binding, planning a wireless-only gate, or asking where a key can be dropped before it reaches the host</p>
+<p class="status">Status: solved on hardware (2026-10-25) — the wake leak was the factory-value fallback for an empty per-key record, and deleting it fixed the first press after a wireless wake; the 2026-10-26 release build starts from the clean arrow bake (dropping an inherited 30 s idle dropper that swallowed keys) and adds <code>Fn</code>+Left = Volume Down (<a href="#fallback">removing the fallback</a>) · Read when: the first press after a wireless wake carries the wrong (factory) binding, planning a wireless-only gate, or asking where a key report can be dropped before it reaches the host</p>
 
 <section id="what-it-is">
   <h2>What it is</h2>
@@ -246,10 +246,11 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <section id="fallback">
   <h2>Removing the fallback instead of the report</h2>
   <p>If the hook never sees the byte, stop looking for the byte on the wire and delete the thing that produces it. The leak is one event — the first press after a wake, handled while the per-key record is still empty — and that state has its own branch: <code>0x5E66</code> (<code>kind == 0 &amp;&amp; settings == 0</code>) falls into <code>0x5E80</code>, which emits the factory usage that <code>0x5D4A</code> staged a few instructions earlier. A configured remap overwrites the staged byte; a macro does not, which is exactly why only the macro key leaks.</p>
-  <h3>The three edits</h3>
+  <h3>The edits</h3>
   <table>
     <thead><tr><th>offset</th><th>stock</th><th>patched</th><th>why</th></tr></thead>
     <tbody>
+      <tr><td><code>0x16C40</code></td><td><code>3a c1</code></td><td><code>50 ba</code></td><td>Fn row 1: <code>0x50</code> (Left) → <code>0xBA</code> (Volume Down); the row it replaces was keyed to <code>F1</code>, which no 60 % key sends</td></tr>
       <tr><td><code>0x16B50</code></td><td><code>39</code></td><td><code>00</code></td><td>position <code>18</code> (id <code>0x30</code>) stages no factory usage at all</td></tr>
       <tr><td><code>0x5D54</code></td><td><code>bb f1 00 0f 7d d0</code><br><code>cmp.w fp,#0 ; beq 0x5E56</code></td><td><code>00 bf 00 bf 00 bf</code><br>three <code>nop</code></td><td>without this the key would die before its record is read</td></tr>
       <tr><td><code>0x5E80</code></td><td><code>96 2a 10 d3</code><br><code>cmp r2,#0x96 ; blo 0x5EA6</code></td><td><code>00 f0 10 b8</code><br><code>b.w 0x5EA4</code></td><td>the empty-record branch jumps straight to the exit instead of emitting</td></tr>
@@ -257,8 +258,10 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
   </table>
   <p>The <code>0x5D54</code> bail is safe to remove because it only guards positions with no factory usage: all 67 zero bytes of <code>0x16B3E</code> belong to non-physical scan slots, and every one of the 61 physical positions stages a usage. After the patch the empty-record path emits nothing for <em>any</em> key, and a configured macro still runs because the record path (<code>0x5EC6</code>/<code>0x5ECC</code>) is untouched — no clock, no mode byte, no state.</p>
   <h3>What it costs</h3>
-  <p><kbd>Fn</kbd>+this key no longer produces CapsLock: that passthrough read the same factory byte. Everything else is stock, including wired mode, the arrow bake underneath and the code-option/version words. The two remaining risks are honest: if the leak is not the empty-record branch the CapsLock will survive, and the wireless Fn/macro reset seen with the guard build is not addressed here.</p>
-  <p><strong>Built (2026-10-25, not flashed):</strong> <code>analysis/fw_fallback.py</code> → <code>out/fw_fallback.bin</code> <code>8dcf93e3…</code> and <code>out/fw_fallback.exe</code> <code>bd419289…</code>, on top of the image the keyboard runs now (<code>4dd3201c…</code>); 9 image bytes differ. The builder asserts the position, the factory byte, the catalog record, both stock instruction words, the exact diff set, the patched disassembly, and that no other physical position loses its usage.</p>
+  <p><kbd>Fn</kbd>+this key no longer produces CapsLock: that passthrough read the same factory byte. Everything else is stock, including wired mode, the arrow bake underneath and the code-option/version words. The wireless <kbd>Fn</kbd>+this-key reset seen with the guard build is still not explained, and this patch does not touch that branch.</p>
+  <p><strong>Result (2026-10-25, flashed):</strong> the leak is gone. Waking with the macro key types nothing; the next press runs the macro. Nine bytes had done the job, on the image that was then on the keyboard.</p>
+  <p><strong>The follow-up bug that fixing it exposed:</strong> that base also carried the <em>first</em> build's 30 s / 2 s idle dropper, because each build had been layered on "the image the device runs" to keep the arrow cluster. The dropper never saw the wake leak (that path skips the funnel) but it did see ordinary typing, so after 30 s idle the first presses in wireless were swallowed. Layering is what smuggled it forward; the release build starts from the clean <code>bake3</code> instead, and the builder now refuses a base whose <code>0x127E0</code> is not the stock <code>push.w</code> unless <code>--allow-hook</code> is passed.</p>
+  <p><strong>Built (2026-10-26, release build):</strong> <code>analysis/fw_fallback.py --base analysis/out/fw_bake3.bin --fn-row Left=VolDown</code> → <code>analysis/out/release/mini60he_max_remap.bin</code> <code>ecb236fb…</code> and <code>.exe</code> <code>0a61d1e7…</code>. 23 bytes below stock (the 12-byte arrow bake plus 11 here), no hook, blank stub band. The builder asserts the position, the factory byte, the catalog record, both stock instruction words, the new row's input being reachable and its slot unreachable, the exact diff set, the patched disassembly, and that no other physical position loses its usage.</p>
 </section>
 
 <section id="not-established">
@@ -268,10 +271,10 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
     <li>Whether the apply window is really 2 s in every configuration (2.4G vs BT, dongle vs host) — the constant is the user's measurement, not a firmware value.</li>
     <li>Whether the idle gap that matters is the link's or the host's; 30 s is a guess that has to be tested against the keyboard's actual sleep timeout.</li>
     <li>What the host sees for a suppressed press: nothing is staged, but the report cycle still runs; a stale report is possible in principle, not observed.</li>
-    <li><strong>Which input was wrong.</strong> The first flash proved at least one of the three was, and the marker build could not answer it (it broke the pipeline). The static follow-up narrowed it: the tick cannot freeze, nothing writes the mode byte on link state, and the only self-reset is the HardFault path — which leaves "the wake restarts the MCU" and "the tables are rebuilt late" as the live explanations, and the boot-window build tests the first of them.</li>
+    <li><strong>Which input was wrong — answered.</strong> None of the three: the leak never passed the funnel at all. The handler emitted the staged factory byte for an empty per-key record, which is why every timed predicate and the funnel guard were inert.</li>
     <li>What the per-key tables hold during the window. The rebuild is in the link-up path (<code>0x59F0</code> from <code>0x6EB8</code>), but whether the RAM is stale, cleared, or never filled before that call is not proven — only that it is not the user's configuration at the moment the first press arrives.</li>
     <li><strong>Why the guard build reset the MCU in wireless.</strong> <kbd>Fn</kbd>+this key rebooted (boot lighting) and repeated presses froze the keyboard, which points at the Fn/macro branch faulting while the wireless tables are not valid — a bad dereference, not a timing bug. Not explained statically yet, and the new build does not touch that path.</li>
-    <li>Whether the empty-record branch is really the one that fires first. The new build is the experiment: if CapsLock survives it, the next read is the kind-2 record path at <code>0x5ECC</code> and the factory byte is coming from somewhere else.</li>
+    <li>Whether the empty-record branch is really the one that fires first — <strong>confirmed on hardware 2026-10-25</strong>: the nine-byte build removed the leak, so that branch was the source.</li>
   </ul>
 </section>
 

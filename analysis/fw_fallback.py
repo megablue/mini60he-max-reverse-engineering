@@ -25,6 +25,10 @@ clock and no state: it removes the fallback itself.
 
 The three edits
 ---------------
+0. --fn-row KEY=ACTION (optional) spends one free Windows Fn-overlay row.
+   For this build: Left=VolDown -> row 1, 3a c1 becomes 50 ba. Only a row whose
+   input usage no physical key sends is chosen, so nothing else changes; Fn+Right
+   (row 32) and Fn+F11/F12 stay exactly as released.
 1. 0x16B3E + 18 = 0x00     position 18 (the scan grid maps it to id 0x30) no
                            longer stages a factory usage at all.
 2. 0x5D54 = nop;nop;nop    the `cmp.w fp,#0 / beq 0x5E56` bail would otherwise
@@ -55,15 +59,21 @@ from pathlib import Path
 
 import capstone
 
+import fw_build as fb
+import fw_names
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 OUT = SCRIPT_DIR / "out"
 
 IMG_LEN = 0x7E000
 TAIL = 0x7DFFC
 SCAN_GRID = 0x16A96          # position -> key id (128 bytes)
+PAIRS = 0x16DDA              # id -> usage pairs (reverse lookup side)
 STAGED = 0x16B3E             # position -> factory usage (128 bytes)
 LAYER0 = 0x16C3E             # Windows Fn overlay, 51 rows of 2 bytes
 CATALOG = 0x9600             # id -> 4-byte record
+HOOK = 0x127E0               # the report funnel; must be the stock push.w here
+STOCK_PUSH = bytes.fromhex("2de9f05f")
 KEY_ID = 0x30                # CapsLock
 KEY_USAGE = 0x39
 
@@ -100,6 +110,44 @@ def disasm(data: bytes, at: int, n: int = 8):
     return list(md.disasm(data[at:at + 0x40], at))[:n]
 
 
+def plan_fn_row(img: bytes, spec: str, pinned: int | None):
+    """(row, key_usage, action, old_bytes) for a new Windows Fn-overlay row.
+
+    The row's *input* must be a usage some physical key really emits (otherwise
+    the chord can never fire), while the row we overwrite must be one no
+    physical key can reach (otherwise we would lose a live binding).
+    """
+    if "=" not in spec:
+        raise SystemExit(f"--fn-row wants KEY=ACTION, got {spec!r}")
+    left, right = spec.split("=", 1)
+    key = fw_names.usage_of(left)
+    action = fb.action_of(right)
+    if action < 0x90:
+        raise SystemExit(f"{right!r} resolves to 0x{action:02X}, not an Fn action")
+    ids = {img[SCAN_GRID + p] for p in range(128) if img[SCAN_GRID + p] != 0x7D}
+    carried = {img[PAIRS + 2 * (i if i < 0x6F else i - 1) + 1] for i in ids}
+    if key not in carried:
+        raise SystemExit(f"no physical key emits 0x{key:02X}; the chord could"
+                         " never fire")
+    rows = [(r, img[LAYER0 + 2 * r], img[LAYER0 + 2 * r + 1]) for r in range(51)]
+    if any(k == key for _, k, _ in rows):
+        raise SystemExit(f"layer0 already has a row keyed 0x{key:02X}")
+    if pinned is None:
+        free = [r for r, k, _ in rows if k not in carried]
+        if not free:
+            raise SystemExit("no free Fn-overlay row")
+        row = free[0]
+    else:
+        if not 0 <= pinned < 51:
+            raise SystemExit("--fn-row-index must be 0..50")
+        if rows[pinned][1] in carried:
+            raise SystemExit(f"row {pinned} is keyed 0x{rows[pinned][1]:02X},"
+                             " which a physical key still sends")
+        row = pinned
+    old = bytes(img[LAYER0 + 2 * row:LAYER0 + 2 * row + 2])
+    return row, key, action, old
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--base", type=Path, default=OUT / "fw_deadwin_remap.bin",
@@ -108,6 +156,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-dir", type=Path, default=OUT)
     ap.add_argument("--no-exe", action="store_true")
     ap.add_argument("--allow-any-base", action="store_true")
+    ap.add_argument("--allow-hook", action="store_true",
+                    help="accept a base that already carries an inherited 0x127E0 hook")
+    ap.add_argument("--fn-row", default=None, metavar="KEY=ACTION",
+                    help="add a Windows Fn-overlay row, e.g. Left=VolDown")
+    ap.add_argument("--fn-row-index", type=int, default=None,
+                    help="pin the overlay row (0..50); default: the first free one")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -126,6 +180,12 @@ def main(argv: list[str] | None = None) -> int:
                     " the image you really mean")
     if base_sha in KNOWN_BASES:
         print(f"           {KNOWN_BASES[base_sha]}")
+    # Layering a code patch forward is how the 30 s idle dropper reached the
+    # keyboard once already; refuse that unless it is asked for explicitly.
+    if bytes(img[HOOK:HOOK + 4]) != STOCK_PUSH and not args.allow_hook:
+        return fail(f"base carries an inherited hook at 0x{HOOK:05X}"
+                    f" ({bytes(img[HOOK:HOOK + 4]).hex(' ')}); rebuild on fw_bake3.bin"
+                    " or pass --allow-hook")
 
     # ---- what the base already says -------------------------------------
     positions = [p for p in range(128) if img[SCAN_GRID + p] == KEY_ID]
@@ -161,15 +221,24 @@ def main(argv: list[str] | None = None) -> int:
     layer0_rows = [r for r in range(51) if img[LAYER0 + r * 2] == KEY_USAGE]
     if layer0_rows:
         return fail(f"layer0 already has a row keyed 0x{KEY_USAGE:02X}: {layer0_rows}")
+    fn_edit = None
+    if args.fn_row:
+        fn_edit = plan_fn_row(img, args.fn_row, args.fn_row_index)
 
     # ---- apply -----------------------------------------------------------
     patched = bytearray(img)
     patched[STAGED + pos] = 0x00
     patched[BAIL:BAIL + 6] = BAIL_PATCH
     patched[EMPTY:EMPTY + 4] = EMPTY_PATCH
+    if fn_edit:
+        row, key, action, _ = fn_edit
+        patched[LAYER0 + 2 * row] = key
+        patched[LAYER0 + 2 * row + 1] = action
 
     changed = [i for i in range(IMG_LEN) if img[i] != patched[i]]
     allowed = set(range(BAIL, BAIL + 6)) | set(range(EMPTY, EMPTY + 4)) | {STAGED + pos}
+    if fn_edit:
+        allowed |= set(range(LAYER0 + 2 * fn_edit[0], LAYER0 + 2 * fn_edit[0] + 2))
     outside = [c for c in changed if c not in allowed]
     if outside:
         return fail(f"bytes changed outside the three edits: {[hex(c) for c in outside]}")
@@ -207,6 +276,11 @@ def main(argv: list[str] | None = None) -> int:
     p("  the next event sees the loaded record, which is why only one key leaks.")
     p("")
     p("the edits")
+    if fn_edit:
+        row, key, action, old = fn_edit
+        p(f"  0x{LAYER0 + 2 * row:05X}  {old.hex(' ')} -> {key:02x} {action:02x}"
+          f"     Fn row {row}: 0x{key:02X} -> 0x{action:02X}"
+          f" ({fb.action_name(action)})")
     p(f"  0x{STAGED + pos:05X}  {KEY_USAGE:02x} -> 00     position {pos} (id 0x{KEY_ID:02X}) stages no usage")
     p(f"  0x{BAIL:05X}  {BAIL_BYTES.hex(' ')} -> {BAIL_PATCH.hex(' ')}")
     p("           cmp.w fp,#0 / beq 0x5E56 removed: the record is still read")
