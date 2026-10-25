@@ -184,11 +184,11 @@ class Stub:
 def build() -> tuple[bytes, dict[str, int]]:
     s = Stub()
     # ---------------- capture, reached from 0x5E80 ----------------
+    # No mode-byte test on purpose: the switch debouncer writes 0x20000378, and
+    # during a wake it can still read 0 for the first event. The branch only
+    # fires when the record is empty, which in wired mode never happens.
     s.at("cap")
     s.raw("1fb4")                     # push {r0,r1,r2,r3,r4}
-    s.ldr(0, "mode")
-    s.raw("0078")                     # ldrb r0,[r0]
-    s.cbz(0, "cap_out")               # wired -> nothing to hold
     s.ldr(0, "state")
     s.raw("0178")                     # ldrb r1,[r0]        valid
     s.cbnz(1, "cap_out")
@@ -211,14 +211,18 @@ def build() -> tuple[bytes, dict[str, int]]:
     s.raw("2de90f44")                 # push.w {r0,r1,r2,r3,r10,lr}
     s.ldr(0, "state")
     s.raw("0178")                     # ldrb r1,[r0]        valid
-    s.cbz(1, "poll_cont")
+    s.cbnz(1, "poll_body")
+    s.b("poll_cont")
+    s.at("poll_body")
     s.raw("4278")                     # ldrb r2,[r0,#1]     position
     s.ldr(3, "grid")
     s.raw("9a5c")                     # ldrb r2,[r3,r2]     id
     s.raw("9200")                     # lsls r2,r2,#2
     s.ldr(3, "rec")
     s.raw("9a5c")                     # ldrb r2,[r3,r2]     kind
-    s.cbnz(2, "poll_ready")
+    s.raw("093a")                     # subs r2,#9
+    s.raw("032a")                     # cmp  r2,#3
+    s.bcond("bls", "poll_ready")      # 9..0xC = a configured special record
     s.ldr(2, "now")
     s.raw("1268")                     # ldr r2,[r2]
     s.raw("4368")                     # ldr r3,[r0,#4]      stamp
