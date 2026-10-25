@@ -264,6 +264,36 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
   <p><strong>Built (2026-10-26, release build):</strong> <code>analysis/fw_fallback.py --base analysis/out/fw_bake3.bin --fn-row Left=VolDown</code> → <code>analysis/out/release/mini60he_max_remap.bin</code> <code>ecb236fb…</code> and <code>.exe</code> <code>0a61d1e7…</code>. 23 bytes below stock (the 12-byte arrow bake plus 11 here), no hook, blank stub band. The builder asserts the position, the factory byte, the catalog record, both stock instruction words, the new row's input being reachable and its slot unreachable, the exact diff set, the patched disassembly, and that no other physical position loses its usage.</p>
 </section>
 
+<section id="first-press">
+  <h2>Making the first press work, not just silent</h2>
+  <p>The release build stops the wrong key from going out: the first press after a wireless wake emits nothing. It does not run the macro that key carries. Doing that is a <em>dispatch</em> problem, not a keymap one, and the 2026-10-26 read below moved the target twice.</p>
+  <h3>The dispatch map (verified)</h3>
+  <p>Every key event reaches one dispatcher. It reads the per-key record kind from <code>[sp,#8]</code> and tail-branches:</p>
+  <table>
+    <thead><tr><th>record kind</th><th>handler</th><th>what it is</th></tr></thead>
+    <tbody>
+      <tr><td><code>9</code>, <code>0xA</code></td><td><code>0x5A00</code></td><td>the position-indexed handler with the media/Fn-action path</td></tr>
+      <tr><td><code>0xB</code>, <code>0xC</code></td><td><code>0x7500</code></td><td>the second special handler</td></tr>
+      <tr><td>anything else</td><td><code>0x5D28</code></td><td>the generic handler — the one that stages the factory usage at <code>0x5D4A</code></td></tr>
+    </tbody>
+  </table>
+  <p>And immediately before that dispatch there is a gate at <code>0x37E2</code>: it reads one byte, <code>0x2000008F</code>, and if it is <strong>non-zero</strong> it skips the kind dispatch entirely and goes straight to <code>0x5D28</code>. So a macro key whose record is kind <code>9</code> is handled as an ordinary key whenever that byte is set — which is exactly the observed "factory CapsLock" behaviour. All nine references to <code>0x2000008F</code> in the image are reads; no direct store was found, so its writer is still computed-indirect, like <code>0x5b1d6c</code> was.</p>
+  <h3>Why "reload before scanning resumes" was dropped</h3>
+  <p>The plan was to move the per-key load ahead of key dispatch. That route is falsified: the loader <code>0x58D0</code> has exactly <strong>one</strong> <code>bl</code> caller in the whole image, <code>0x153EC</code>, inside the boot init — it runs once, then the code falls into the main loop at <code>0x153FC</code>. There is no wake-time reload to move, and no other call site to reuse.</p>
+  <p>That also retires an older note on this page: the link-up re-init does not rebuild these tables. <code>0x59F0</code> is a GPIO pulse helper (<code>bl 0x5468</code>, <code>b.w 0x5450</code>, both OR-ing bits of <code>0x40038000</code>), not a loader.</p>
+  <h3>The routes, with cost</h3>
+  <table>
+    <thead><tr><th>rank</th><th>route</th><th>form</th><th>agent effort (est.)</th><th>flashes</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td><strong>Skip the dispatch gate at wake</strong> — find the writer of <code>0x2000008F</code>, then clear it on the wireless-entry path or ignore it for the first event</td><td>1–2 byte edit or one call</td><td>20–30k</td><td>1</td></tr>
+      <tr><td>2</td><td><strong>Deferred press</strong> — hold the event, replay it once the record path is available</td><td>~120 B, 1 RAM dword, 2 hooks</td><td>35–50k</td><td>1</td></tr>
+      <tr><td>3</td><td><strong>Bake the config</strong> — put the record and macro blob in the image</td><td>table data only</td><td>50–90k</td><td>1</td></tr>
+      <tr><td>—</td><td><s>Reload before scanning resumes</s></td><td colspan="3">falsified: no wake-time reload exists (<code>0x58D0</code> is boot-only)</td></tr>
+    </tbody>
+  </table>
+  <p>Route 1 is now the cheapest and the most direct: the gate is the thing that decides whether a macro key is treated as a macro, so if it can be put in the right state at wake, no new state machine is needed. The remaining unknown is its writer, which is a single targeted scan rather than a design.</p>
+</section>
+
 <section id="not-established">
   <h2>Not established</h2>
   <ul>
@@ -272,7 +302,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
     <li>Whether the idle gap that matters is the link's or the host's; 30 s is a guess that has to be tested against the keyboard's actual sleep timeout.</li>
     <li>What the host sees for a suppressed press: nothing is staged, but the report cycle still runs; a stale report is possible in principle, not observed.</li>
     <li><strong>Which input was wrong — answered.</strong> None of the three: the leak never passed the funnel at all. The handler emitted the staged factory byte for an empty per-key record, which is why every timed predicate and the funnel guard were inert.</li>
-    <li>What the per-key tables hold during the window. The rebuild is in the link-up path (<code>0x59F0</code> from <code>0x6EB8</code>), but whether the RAM is stale, cleared, or never filled before that call is not proven — only that it is not the user's configuration at the moment the first press arrives.</li>
+    <li>What the per-key tables hold during the window — <strong>less relevant than it looked</strong>: the loader <code>0x58D0</code> runs once at boot and has no wake-time caller, so the first event is most likely routed to the generic handler by the dispatch gate <code>0x2000008F</code> rather than reading an empty record. See <a href="#first-press">the first press</a>.</li>
     <li><strong>Why the guard build reset the MCU in wireless.</strong> <kbd>Fn</kbd>+this key rebooted (boot lighting) and repeated presses froze the keyboard, which points at the Fn/macro branch faulting while the wireless tables are not valid — a bad dereference, not a timing bug. Not explained statically yet, and the new build does not touch that path.</li>
     <li>Whether the empty-record branch is really the one that fires first — <strong>confirmed on hardware 2026-10-25</strong>: the nine-byte build removed the leak, so that branch was the source.</li>
   </ul>
