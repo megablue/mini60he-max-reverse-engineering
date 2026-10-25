@@ -13,15 +13,22 @@ As of 2026-10-24.
 
 ## State
 
-The first patch that adds **code** is built and not flashed: `analysis/fw_deadwin.py`
-hooks the report funnel (`0x127E0`, four bytes, `b.w 0x20000`) and puts a 64-byte
-stub in blank flash that drops every key for two seconds after a wireless wake.
-The wake edge is our own — a key gap of at least 30 s — because the firmware's
-link-ready path cannot be armed safely; wired leaves through the first branch and
-is byte-for-byte stock. Two dwords of state live at `0x20000610`, an unreferenced
-hole the builder re-scans. Image `2a26756a…` / exe `4cbf3097…` from the stock
-image, and `4dd3201c…` / `7dd6a392…` on top of the arrow-cluster bake. Docs:
-[The wireless dead window](docs/features/dead-window.html).
+The first patch that adds **code** was built, flashed on 2026-10-24, and **changed
+nothing**: `analysis/fw_deadwin.py` hooks the report funnel (`0x127E0`, four bytes,
+`b.w 0x20000`) and puts a 64-byte stub in blank flash that should drop every key
+for two seconds after a wireless wake. The wake edge is our own — a key gap of at
+least 30 s — because the firmware's link-ready path cannot be armed safely; wired
+leaves through the first branch and is byte-for-byte stock. Two dwords of state
+live at `0x20000610`, an unreferenced hole the builder re-scans. Image `2a26756a…`
+/ exe `4cbf3097…` from the stock image, and `4dd3201c…` / `7dd6a392…` on top of the
+arrow-cluster bake — the last one is what ran, and the CapsLock leak survived it.
+
+So the next build is an experiment, not a fix: `analysis/fw_deadwin_probe.py` keeps
+the hook and the timer and throws the drop away, writing a letter into the action
+byte `0x2000008C` instead — `a` = mode byte says wired, `q` = wireless and inside
+the window, `w` = wireless and past it. 88-byte stub, image `21223c42…`, exe
+`bf2c662d…`, built and not flashed. Whichever letter appears names the gate that
+is lying. Docs: [The wireless dead window](docs/features/dead-window.html#marker).
 
 There is now one command from "I want this key to do that" to a flashable
 installer: `analysis/fw_build.py`. `KEY=TARGET` rewrites the catalog byte that a
@@ -312,12 +319,15 @@ value, which is why the ladder starts with a 500 ms single-key run.
   Nuance (2026-10-24): the Fn enum does carry BT host switching (`0xA0–0xA3`;
   `Fn+W` = host 2, verified on the keyboard), so a host↔radio command channel
   exists somewhere — the negative evidence covers strings and peripherals only.
-- The dead window is built and unflashed: validate wired first, then one press
-  after a 30 s idle in wireless (must be dropped), then typing inside and after
-  the 2 s, then continuous typing, then a wired→wireless switch. The two open
-  questions are whether 30 s matches the keyboard's real sleep timeout and
+- The dead window was flashed and did nothing: the CapsLock leak survived, two
+  presses still reached the host, the wake itself was instant and the window was
+  still about 2 s. The marker build is now the open experiment — flash
+  `out/fw_deadwin_probe.exe` (`bf2c662d…`) and read which letter appears: `a` means
+  the mode byte says wired, `q` means the stub's condition was true (so the early
+  return is the problem), `w` means wireless but the timer never armed. Two open
+  questions stay: whether 30 s matches the keyboard's real sleep timeout, and
   whether the firmware's own wake window is longer than 2 s. The RF settings
-  replay itself is not fixed by the patch.
+  replay itself is not fixed by any of this.
 
 ## Known gaps (volatile; the durable traps live in the feature pages)
 

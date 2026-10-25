@@ -18,7 +18,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <body>
 <article class="map page">
 <h1>The wireless dead window — drop the first 2 s of keys after a wake</h1>
-<p class="status">Status: design + builder (2026-10-24) — the patch is built in <code>analysis/fw_deadwin.py</code> and has never been flashed; the funnel, the tick and the free space are verified, the wake edge is our own heuristic (a 30 s key gap) because the firmware's link-ready path cannot be armed safely — it may run on every frame · Read when: the first presses after a wireless wake arrive with the wrong (factory) binding, planning a wireless-only gate, or asking where a key can be dropped before it reaches the host</p>
+<p class="status">Status: flashed once and it changed nothing (2026-10-24) — the drop at the report funnel is built, written to hardware, and the CapsLock leak survived; a marker build that reports the stub's two inputs instead of dropping now exists to find out which gate is wrong · Read when: the first presses after a wireless wake arrive with the wrong (factory) binding, planning a wireless-only gate, or asking where a key can be dropped before it reaches the host</p>
 
 <section id="what-it-is">
   <h2>What it is</h2>
@@ -29,6 +29,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
     <li><strong>After the window the configured macro works.</strong> The same key never sends CapsLock again until the next wake.</li>
   </ul>
   <p>The request: <strong>make the window real</strong> — throw the presses away instead of sending the wrong thing, for about 2 s, and only while the keyboard is wireless.</p>
+  <p><strong>2026-10-24, after the first write:</strong> the built patch was flashed (<code>out/fw_deadwin_remap.exe</code>, <code>7dd6a392…</code> — the arrow bake plus this stub). The keyboard boots and types, the arrow cluster still works, and a wireless wake still leaks CapsLock. Two presses during the window still reach the host. The wake itself is instant; the window is still about 2 s. So the drop did not take effect, and the next step is not another guess but a build that reports what the stub sees — see <a href="#marker">the marker build</a>.</p>
 </section>
 
 <section id="why-it-happens">
@@ -103,7 +104,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 </pre>
   <h3>State, time base and builds</h3>
   <p><strong>State:</strong> two dwords at <code>0x20000610</code> (last key, armed). That address sits in a 0x1EC-byte hole between <code>0x2000060C</code> and <code>0x200007F9</code>: no literal anywhere in the image names it, and an effective-address scan of the whole code region finds no load or store in <code>0x20000600..0x20000800</code>. The builder re-runs that scan over its window and refuses a candidate that is referenced.</p>
-  <p><strong>Built (2026-10-24, not flashed):</strong> on the stock image, <code>out/fw_deadwin.bin</code> <code>2a26756a…</code> and <code>out/fw_deadwin.exe</code> <code>4cbf3097…</code>; on top of the arrow-cluster bake, <code>out/fw_deadwin_remap.bin</code> <code>4dd3201c…</code> and <code>.exe</code> <code>7dd6a392…</code>. <code>--window</code> and <code>--idle</code> retune the two immediates; every other byte of the stub is asserted against the disassembly above.</p>
+  <p><strong>Built and flashed (2026-10-24):</strong> on the stock image, <code>out/fw_deadwin.bin</code> <code>2a26756a…</code> and <code>out/fw_deadwin.exe</code> <code>4cbf3097…</code>; on top of the arrow-cluster bake, <code>out/fw_deadwin_remap.bin</code> <code>4dd3201c…</code> and <code>.exe</code> <code>7dd6a392…</code> — that last one is what ran on the device, and it did not produce a dead window. <code>--window</code> and <code>--idle</code> retune the two immediates; every other byte of the stub is asserted against the disassembly above.</p>
   <p><strong>Time base:</strong> the SysTick handler <code>0x3FE8</code> adds the step byte to <code>0x200004A8</code>, and the reload at <code>0x4044</code> divides the core clock by <code>1000/step</code> — so that counter is milliseconds by construction, whatever the step is.</p>
 </section>
 
@@ -136,6 +137,29 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
     <li><strong>Wireless, continuous typing.</strong> Gaps under 30 s must never arm: no key may disappear mid-sentence.</li>
     <li><strong>Wired→wireless switch after a pause.</strong> The first press is dropped (the last wireless press was more than 30 s ago), then normal.</li>
   </ol>
+  <p><strong>Run on 2026-10-24: failed at step 2.</strong> The press reached the host with the factory binding, and the arrow cluster and wired behaviour were unchanged. That is why <a href="#marker">the marker build</a> exists.</p>
+</section>
+
+<section id="marker">
+  <h2>The marker build</h2>
+  <p>There is no readback, so the device has to report the value itself. <code>analysis/fw_deadwin_probe.py</code> keeps the hook, keeps the timer, and <strong>throws the drop away</strong>: instead of returning early it writes one letter into the action byte <code>0x2000008C</code>, a few instructions before the stock converter reads it. Whatever the host types is the stub's answer.</p>
+  <table>
+    <thead><tr><th>Letter</th><th>The stub saw</th></tr></thead>
+    <tbody>
+      <tr><td><code>a</code></td><td>mode byte <code>0x20000378</code> is <code>0</code> — "wired"</td></tr>
+      <tr><td><code>q</code></td><td>wireless, and the elapsed time is inside the 2000 ms window</td></tr>
+      <tr><td><code>w</code></td><td>wireless, and the window has expired</td></tr>
+    </tbody>
+  </table>
+  <p>Reading it:</p>
+  <ul>
+    <li><strong>Still CapsLock, no letters at all</strong> → the hook or the write never landed, and the leak is upstream of this funnel.</li>
+    <li><strong><code>a</code> at every press</strong> → the mode byte reads <code>0</code> in wireless; the predicate has to come from something else.</li>
+    <li><strong><code>a</code> inside the window, <code>w</code> after it</strong> → the switch read lies during bring-up and only settles later.</li>
+    <li><strong><code>q</code> for ~2 s, then <code>w</code></strong> → hook, mode and timer are all correct, and the early return is what loses the drop; suppress later, where the report is built.</li>
+  </ul>
+  <p>It writes the same two sites (hook at <code>0x127E0</code>, 88 bytes at <code>0x20000</code>) and touches nothing else, so the gates below apply unchanged. It drops nothing, so the keyboard types letters until it is reflashed — the vendor updater is the way back. A press may print its letter more than once (the release can pass the funnel too): read the letter, not the count.</p>
+  <p><strong>Built (2026-10-24, not flashed):</strong> <code>out/fw_deadwin_probe.bin</code> <code>21223c42…</code> and <code>out/fw_deadwin_probe.exe</code> <code>bf2c662d…</code>, on top of the arrow-cluster bake. 81 image bytes differ (4 for the hook, 77 of the stub — the rest of the 88 was already zero) and 93 in the exe (the bake's 12 plus those).</p>
 </section>
 
 <section id="not-established">
@@ -145,7 +169,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
     <li>Whether the apply window is really 2 s in every configuration (2.4G vs BT, dongle vs host) — the constant is the user's measurement, not a firmware value.</li>
     <li>Whether the idle gap that matters is the link's or the host's; 30 s is a guess that has to be tested against the keyboard's actual sleep timeout.</li>
     <li>What the host sees for a suppressed press: nothing is staged, but the report cycle still runs; a stale report is possible in principle, not observed.</li>
-    <li>Nothing here is flashed. The built artefacts are under <code>analysis/out/</code>.</li>
+    <li><strong>Which input is wrong.</strong> The first flash says at least one of the three is, and the marker build is the experiment that separates them. Its result belongs in this list.</li>
   </ul>
 </section>
 

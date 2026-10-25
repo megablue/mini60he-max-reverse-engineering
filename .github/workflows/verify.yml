@@ -79,3 +79,20 @@ jobs:
           assert img[0x20000:0x20004] == bytes.fromhex("2de9f05f"), "stub changed"
           assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
           PY
+
+      - name: Rebuild the dead-window marker and pin it
+        run: |
+          python analysis/fw_deadwin_probe.py --base analysis/out/ci_bake.bin --no-exe --name ci_deadwin_probe
+          python - <<'PY'
+          import hashlib, pathlib
+          want = "21223c426d4065bf29db21b43cb3859390cf33c79c16c7a6a0d324ca49c56433"
+          got = hashlib.sha256(pathlib.Path("analysis/out/ci_deadwin_probe.bin").read_bytes()).hexdigest()
+          print("ci_deadwin_probe.bin", got)
+          assert got == want, "the marker build does not reproduce"
+          img = pathlib.Path("analysis/out/ci_deadwin_probe.bin").read_bytes()
+          assert img[0x127E0:0x127E4] == bytes.fromhex("0df00ebc"), "hook changed"
+          # a/q/w table, then the four literal words the stub loads
+          assert img[0x20044:0x20048] == bytes.fromhex("04141a00"), "letter table changed"
+          assert img[0x20048:0x20058] == bytes.fromhex("8c00002078030020a804002010060020"), "literals changed"
+          assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
+          PY
