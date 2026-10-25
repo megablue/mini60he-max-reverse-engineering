@@ -338,6 +338,18 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 </pre>
   <p>A key with settings is diverted whenever <code>0x2000008F</code> is non-zero, and the diverted path never arms the macro; the staged factory byte then goes out downstream. That is the observed behaviour, and it also explains why the <em>dispatcher</em> gate probe changed nothing: that gate sits earlier and both branches end here.</p>
   <p><strong>Built (2026-10-26, probe):</strong> <code>analysis/fw_armgate.py</code> → <code>0x5AAC</code> <code>34 d1</code> → <code>00 bf</code> (drop the diversion), image <code>c63367bf…</code>, exe <code>d9347ace…</code>. If the macro runs on the first press after a wake, this gate was the cause. When <code>0x2000008F</code> is zero nothing changes at all, so wired behaviour is untouched.</p>
+  <p><strong>Result: no change (2026-10-26).</strong> The macro still waits for a second press. That, plus "no CapsLock", says the diversion was not being taken for this key — the gate is behind a condition this key does not meet.</p>
+  <h3>Where the factory binding actually comes from</h3>
+  <p>Scanning for every reader of the factory table found the real mechanism, outside the key handlers entirely. A filler function at <code>0x10978</code> loops over all 168 scan positions:</p>
+  <pre class="verbatim" data-why="the filler loop as it sits in the image">
+0x109AC  ldrb r0,[r6,r4]        ; id   = 0x16A96[position]
+0x109AE  ldrb r1,[r5,r0,lsl #2] ; kind of that key's settings entry
+0x109B2  cbnz r1, 0x109BA       ; already has settings -> leave it
+0x109B4  ldrb r1,[r7,r4]        ; usage = 0x16B3E[position]  (factory)
+0x109B6  bl   0x109D8           ; synthesise a record from that usage
+</pre>
+  <p>and <code>0x109D8</code> writes into <code>0x200026AE</code> — the <em>settings</em> mirror, not the catalog. So on a settings apply, every key that has no entry yet is given a synthetic record built from its factory usage. For the macro key that is <code>0x39</code>: CapsLock. Its own settings arrive after that pass, which is exactly the "first press is factory, second press is the macro" behaviour, and it is why every hook placed in the key handlers stayed silent — the press is answered from tables this filler had just populated, and the deferral never saw an empty record.</p>
+  <p>Consequence for the goal: no table or handler edit can make that first press run the macro, because at that instant the firmware genuinely does not have the macro yet. The two honest ways forward are to bake the per-key settings into the image (so they exist before the filler runs — the Tier-B route, which needs the settings record format reversed) or to accept the current behaviour.</p>
 </section>
 
 <section id="not-established">
