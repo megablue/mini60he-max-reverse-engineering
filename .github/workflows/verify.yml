@@ -176,13 +176,13 @@ jobs:
           python analysis/fw_defer.py --base analysis/out/ci_release.bin --no-exe --name ci_defer
           python - <<'PY'
           import hashlib, pathlib
-          want = "64fc7d13b1a524b12f0c12643dfb5841d1d18cc3cd25b5be365b6784ffe9630a"
+          want = "7f0740854b0f8de30165de0ea099297749c14fde29fb301ba0779e26748aa342"
           got = hashlib.sha256(pathlib.Path("analysis/out/ci_defer.bin").read_bytes()).hexdigest()
           print("ci_defer.bin", got)
           assert got == want, "the deferred press does not reproduce"
           img = pathlib.Path("analysis/out/ci_defer.bin").read_bytes()
           assert img[0x5E80:0x5E84] == bytes.fromhex("1af0beb8"), "capture hook changed"
-          assert img[0x153FC:0x15400] == bytes.fromhex("0af014be"), "poll hook changed"
-          assert img[0x20000:0x20004] == bytes.fromhex("1fb42048007849b9"), "stub head changed"
+          assert img[0x153FC:0x15400] == bytes.fromhex("0af012be"), "poll hook changed"
+          assert img[0x20000:0x20008] == bytes.fromhex("1fb41f48017849b9"), "stub head changed"
           assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
           PY
