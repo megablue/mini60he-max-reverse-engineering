@@ -170,3 +170,19 @@ jobs:
           assert img[0x20000:0x20004] == bytes.fromhex("00000000"), "stub band is not blank"
           assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
           PY
+
+      - name: Rebuild the deferred press and pin it
+        run: |
+          python analysis/fw_defer.py --base analysis/out/ci_release.bin --no-exe --name ci_defer
+          python - <<'PY'
+          import hashlib, pathlib
+          want = "1307265d8fba9e67948ff385bd0c0eb876f22a4932f2bdb0be9d88a2807138d6"
+          got = hashlib.sha256(pathlib.Path("analysis/out/ci_defer.bin").read_bytes()).hexdigest()
+          print("ci_defer.bin", got)
+          assert got == want, "the deferred press does not reproduce"
+          img = pathlib.Path("analysis/out/ci_defer.bin").read_bytes()
+          assert img[0x5E80:0x5E84] == bytes.fromhex("1af0beb8"), "capture hook changed"
+          assert img[0x153FC:0x15400] == bytes.fromhex("0af014be"), "poll hook changed"
+          assert img[0x20000:0x20004] == bytes.fromhex("1fb41e48007860b1"), "stub head changed"
+          assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
+          PY

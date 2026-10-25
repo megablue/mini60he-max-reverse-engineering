@@ -310,6 +310,17 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
   <p><strong>2026-10-26, flashed:</strong> wired behaviour was unaffected, and the wake still does not run the macro on the first press — but it no longer emits CapsLock either, so the fallback fix still holds. That kills the gate hypothesis: with the gate forced open, a kind-<code>0</code> record still lands on <code>0x5D28</code>, which is exactly what the gate was doing for it anyway.</p>
   <p>What that leaves is the original reading, now with a sharp edge: the per-key record really is not populated for the first event. The only code that fills it is the boot-time loader <code>0x58D0</code> — one caller, <code>0x153EC</code>, inside init — so the first press must be arriving before init finishes, i.e. the key subsystem (at least) re-initialises on a wireless wake. That also explains the boot lighting seen on an earlier build.</p>
   <p>The consequence: no table edit can make that event run its macro, because the information it needs does not exist yet. The only universal fix is to <strong>hold the event and replay it</strong> once the record is populated — the deferred-press route — using the validity byte <code>0x2000386E + id == 5</code> as the "ready" signal, with a ~300 ms deadline so a never-ready record cannot mute a key.</p>
+  <h3>The deferred press</h3>
+  <p>Two hooks and 148 bytes of stub:</p>
+  <table>
+    <thead><tr><th>site</th><th>stock</th><th>patched</th><th>role</th></tr></thead>
+    <tbody>
+      <tr><td><code>0x5E80</code></td><td><code>00 f0 10 b8</code></td><td><code>b.w 0x20000</code></td><td>capture: wireless and an empty record → remember position, event byte, timestamp</td></tr>
+      <tr><td><code>0x153FC</code></td><td><code>bl 0x6BCC</code></td><td><code>b.w 0x20028</code></td><td>poll: the main loop's first call, so it runs continuously; replay is <code>bl 0x6BCC</code> then <code>b.w 0x15400</code></td></tr>
+    </tbody>
+  </table>
+  <p>Replay restores the position into <code>0x200000F4+9</code> and the event byte into <code>+8</code>, sets <code>sl</code> so the handler's macro branch is eligible, and calls <code>0x5D28</code> — the real handler, so the macro arms exactly as it would on a later press. Readiness is the handler's own source of truth: record kind at <code>0x200024AE + id*4</code> becomes non-zero once the loader merges the key's configuration.</p>
+  <p><strong>Built (2026-10-26, not flashed):</strong> <code>analysis/fw_defer.py</code> → <code>out/fw_defer.bin</code> <code>1307265d…</code> and <code>out/fw_defer.exe</code> <code>1cbe27a3…</code>, on the released image (<code>ecb236fb…</code>); 143 bytes differ. Failure modes stay quiet: no record within 300 ms → nothing is typed, exactly as today; <code>sl</code> or the internal gate declining the macro → the staged usage is already <code>0x00</code>, so still nothing. The one structural risk is context: the handler normally runs from the scan IRQ, and here it is called from the main loop, so a real key press could interleave in the window between the restored event and the call.</p>
 </section>
 
 <section id="not-established">
