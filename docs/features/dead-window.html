@@ -18,7 +18,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <body>
 <article class="map page">
 <h1>The wireless dead window — drop the first 2 s of keys after a wake</h1>
-<p class="status">Status: two builds written to hardware, neither produced the window (2026-10-24) — the idle-gap drop never fired, the marker build killed typing and was rolled back, and the premise behind both is now in doubt; a third build keyed on firmware uptime (<a href="#boot-window">the boot-window build</a>) is ready · Read when: the first presses after a wireless wake arrive with the wrong (factory) binding, planning a wireless-only gate, or asking where a key can be dropped before it reaches the host</p>
+<p class="status">Status: five builds written, none has stopped the leak (2026-10-25) — the idle-gap and uptime drops were inert, the marker build killed typing and was rolled back, and the funnel guard was flashed and still let CapsLock through; the leak is now pinned to the <em>empty per-key record</em> branch of the key handler and the latest build deletes that fallback instead of timing it (<a href="#fallback">removing the fallback</a>) · Read when: the first presses after a wireless wake arrive with the wrong (factory) binding, planning a wireless-only gate, or asking where a key can be dropped before it reaches the host</p>
 
 <section id="what-it-is">
   <h2>What it is</h2>
@@ -206,6 +206,61 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
   <p>Why not simply combine both rules: the idle gap would arm on a stale press time after a reboot and the boot rule would then be redundant; keeping one rule per build is what makes the flash an experiment instead of a guess.</p>
 </section>
 
+<section id="macro-guard">
+  <h2>The macro guard — stop the factory usage, not the clock</h2>
+  <p><strong>2026-10-25, user test:</strong> the boot-window build was flashed and the leak survived. The same physical key with a <em>plain remap</em> instead of a macro works on the very first press after a wake. So the window is not the key, not the wire mode, and not "all configuration is late" — it is the macro path only.</p>
+  <p>Both timed builds were structurally unable to fire, which is why they changed nothing: there is no <code>wfi</code> in the main poll block <code>0x10DE0–0x10E60</code>, so the millisecond tick never stops and an idle-gap timer can never arm; and the only self-reset in the image is the HardFault path <code>0x518C</code>, so an uptime window is never true at a wake either. The hook and stub did execute (the marker build proved that by breaking the pipeline), so the predicates, not the sites, were inert.</p>
+  <p>Where the wrong usage comes from: the per-event handler <code>0x5D28</code> stages the key's factory usage from table <code>0x16B3E</code> at <code>0x5D4A</code> before the configured record is considered. That table is indexed by scan position — the macro key (id <code>0x30</code>, position <code>18</code>) stages <code>0x39</code>, CapsLock. A plain remap is a single 4-byte catalog record, so it replaces the staged byte on the first press. A macro is not: kinds <code>9</code>/<code>0xA</code>/<code>0xB</code> branch at <code>0x5EC6</code> into the player arming code at <code>0x6ACE</code> (macro index in catalog record byte 1, data through flash table <code>0x9C00 + idx*4</code>, player flags <code>0x200000B0</code>/<code>0x200000B3</code>), so until that structure is playable the staged factory byte is what reaches the host.</p>
+  <h3>The rule</h3>
+  <table>
+    <thead><tr><th>read at the funnel <code>0x127E0</code></th><th>value</th><th>action</th></tr></thead>
+    <tbody>
+      <tr><td>mode byte <code>0x20000378</code></td><td><code>0</code> (wired)</td><td>stock</td></tr>
+      <tr><td>press flag <code>0x20000090</code></td><td>not <code>1</code> (a release)</td><td>stock</td></tr>
+      <tr><td>macro player <code>0x200000B3</code></td><td>not <code>0</code> (playing)</td><td>stock</td></tr>
+      <tr><td>staged action <code>0x2000008C</code></td><td>not <code>0x39</code></td><td>stock</td></tr>
+      <tr><td colspan="2">press, wireless, idle player, action <code>0x39</code></td><td>return before anything is staged</td></tr>
+    </tbody>
+  </table>
+  <p>No clock is read at all. The guard usage is derived by the builder from <code>--key CapsLock</code> (id <code>0x30</code> → factory usage <code>0x39</code>), not hardcoded.</p>
+  <h3>The bytes</h3>
+  <pre class="verbatim" data-why="exact machine code the keyboard runs; every byte is asserted by the builder">
+0x127E0  0d f0 0e bc          b.w 0x20000        (replaces the stock push.w)
+0x20000  2d e9 f0 5f          push.w {r4-r11, ip, lr}   replay
+0x20004  0a 48 00 78 68 b1    ldr r0,=0x20000378 / ldrb / cbz  -> pass (wired)
+0x2000A  08 48 00 78 39 28 09 d1   ldr r0,=0x2000008C / ldrb / cmp #0x39 / bne pass
+0x20012  08 48 00 78 01 28 05 d1   ldr r0,=0x20000090 / ldrb / cmp #1 / bne pass
+0x2001A  07 48 00 78 00 28 01 d1   ldr r0,=0x200000B3 / ldrb / cmp #0 / bne pass
+0x20022  bd e8 f0 8f          pop.w {r4-r11, ip, pc}    drop
+0x20026  f2 f7 dd bb          b.w 0x127E4        stock body
+0x2002C  8c 00 00 20 | 78 03 00 20 | 90 00 00 20 | b3 00 00 20   literals
+</pre>
+  <h3>Why it cannot type the wrong key</h3>
+  <p>Worst case is that one usage produces nothing while the player is idle. The press never enters the funnel's 5-slot pressed list, so its later release is a harmless no-op rather than a stuck key; wired mode, releases, and every other action are byte-for-byte stock. The old dead-window stub is overwritten, so the arrow-cluster bake underneath is preserved.</p>
+  <p><strong>Built (2026-10-25, not flashed):</strong> <code>analysis/fw_macroguard.py</code> → <code>out/fw_macroguard.bin</code> <code>0eb37a76…</code> and <code>out/fw_macroguard.exe</code> <code>e93edd7d…</code>, on top of the image the keyboard runs now (<code>4dd3201c…</code>). 48 image bytes differ from that base. The builder refuses any base it does not recognise, any key whose factory usage is not a bitmap usage, and any funnel body that reads <code>r0–r3</code> before writing them.</p>
+  <p><strong>Test:</strong> wired — the key still runs the macro. Wireless — wake and press this key inside the ~2 s window: it should type <em>nothing</em> (today it types CapsLock); after the window it runs the macro. Any other key inside the window is unaffected.</p>
+  <h3>The result: it did not fire</h3>
+  <p><strong>2026-10-25, flashed:</strong> the guard did not fire. Wired behaved normally, including <kbd>Fn</kbd>+this key toggling caps; on a wireless wake CapsLock still arrived. Worse, <kbd>Fn</kbd>+this key then appeared to <em>reset the MCU</em> (boot lighting) and repeated presses during the wake froze the keyboard. Two conclusions: the leak never passes through the funnel hook, and the Fn/macro branch can fault while the wireless tables are not yet valid.</p>
+</section>
+
+<section id="fallback">
+  <h2>Removing the fallback instead of the report</h2>
+  <p>If the hook never sees the byte, stop looking for the byte on the wire and delete the thing that produces it. The leak is one event — the first press after a wake, handled while the per-key record is still empty — and that state has its own branch: <code>0x5E66</code> (<code>kind == 0 &amp;&amp; settings == 0</code>) falls into <code>0x5E80</code>, which emits the factory usage that <code>0x5D4A</code> staged a few instructions earlier. A configured remap overwrites the staged byte; a macro does not, which is exactly why only the macro key leaks.</p>
+  <h3>The three edits</h3>
+  <table>
+    <thead><tr><th>offset</th><th>stock</th><th>patched</th><th>why</th></tr></thead>
+    <tbody>
+      <tr><td><code>0x16B50</code></td><td><code>39</code></td><td><code>00</code></td><td>position <code>18</code> (id <code>0x30</code>) stages no factory usage at all</td></tr>
+      <tr><td><code>0x5D54</code></td><td><code>bb f1 00 0f 7d d0</code><br><code>cmp.w fp,#0 ; beq 0x5E56</code></td><td><code>00 bf 00 bf 00 bf</code><br>three <code>nop</code></td><td>without this the key would die before its record is read</td></tr>
+      <tr><td><code>0x5E80</code></td><td><code>96 2a 10 d3</code><br><code>cmp r2,#0x96 ; blo 0x5EA6</code></td><td><code>00 f0 10 b8</code><br><code>b.w 0x5EA4</code></td><td>the empty-record branch jumps straight to the exit instead of emitting</td></tr>
+    </tbody>
+  </table>
+  <p>The <code>0x5D54</code> bail is safe to remove because it only guards positions with no factory usage: all 67 zero bytes of <code>0x16B3E</code> belong to non-physical scan slots, and every one of the 61 physical positions stages a usage. After the patch the empty-record path emits nothing for <em>any</em> key, and a configured macro still runs because the record path (<code>0x5EC6</code>/<code>0x5ECC</code>) is untouched — no clock, no mode byte, no state.</p>
+  <h3>What it costs</h3>
+  <p><kbd>Fn</kbd>+this key no longer produces CapsLock: that passthrough read the same factory byte. Everything else is stock, including wired mode, the arrow bake underneath and the code-option/version words. The two remaining risks are honest: if the leak is not the empty-record branch the CapsLock will survive, and the wireless Fn/macro reset seen with the guard build is not addressed here.</p>
+  <p><strong>Built (2026-10-25, not flashed):</strong> <code>analysis/fw_fallback.py</code> → <code>out/fw_fallback.bin</code> <code>8dcf93e3…</code> and <code>out/fw_fallback.exe</code> <code>bd419289…</code>, on top of the image the keyboard runs now (<code>4dd3201c…</code>); 9 image bytes differ. The builder asserts the position, the factory byte, the catalog record, both stock instruction words, the exact diff set, the patched disassembly, and that no other physical position loses its usage.</p>
+</section>
+
 <section id="not-established">
   <h2>Not established</h2>
   <ul>
@@ -215,6 +270,8 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
     <li>What the host sees for a suppressed press: nothing is staged, but the report cycle still runs; a stale report is possible in principle, not observed.</li>
     <li><strong>Which input was wrong.</strong> The first flash proved at least one of the three was, and the marker build could not answer it (it broke the pipeline). The static follow-up narrowed it: the tick cannot freeze, nothing writes the mode byte on link state, and the only self-reset is the HardFault path — which leaves "the wake restarts the MCU" and "the tables are rebuilt late" as the live explanations, and the boot-window build tests the first of them.</li>
     <li>What the per-key tables hold during the window. The rebuild is in the link-up path (<code>0x59F0</code> from <code>0x6EB8</code>), but whether the RAM is stale, cleared, or never filled before that call is not proven — only that it is not the user's configuration at the moment the first press arrives.</li>
+    <li><strong>Why the guard build reset the MCU in wireless.</strong> <kbd>Fn</kbd>+this key rebooted (boot lighting) and repeated presses froze the keyboard, which points at the Fn/macro branch faulting while the wireless tables are not valid — a bad dereference, not a timing bug. Not explained statically yet, and the new build does not touch that path.</li>
+    <li>Whether the empty-record branch is really the one that fires first. The new build is the experiment: if CapsLock survives it, the next read is the kind-2 record path at <code>0x5ECC</code> and the factory byte is coming from somewhere else.</li>
   </ul>
 </section>
 

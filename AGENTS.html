@@ -135,6 +135,14 @@ marker idea is retired).
 <code>fw_bootwin.py</code> replaces the idle-gap predicate with an uptime one
 (drop wireless keys while <code>0 &lt; now &le; 2500 ms</code>), which is the
 predicate a reboot cannot hide from (<code>out/fw_bootwin_remap*</code>).
+<code>fw_macroguard.py</code> drops the clock entirely: it refuses one key's
+factory usage (derived from <code>--key</code>) at the same funnel while the mode
+byte says wireless, the event is a press and the macro player is idle
+(<code>out/fw_macroguard*</code>).
+<code>fw_fallback.py</code> stops filtering the wire and deletes the source: the
+leaking scan position stages no factory usage and the empty-record branch of
+<code>0x5D28</code> jumps to its exit, so a key whose record is not loaded yet
+emits nothing (<code>out/fw_fallback*</code>).
 </li>
 <li>Analysis artifacts (disassemblies, unpacked payloads, scratch tooling,
 reports) get top-level directories when created, each with a bullet here in

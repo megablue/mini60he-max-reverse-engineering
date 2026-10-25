@@ -48,6 +48,28 @@ theory; immediate typing with CapsLock means the counter does not restart and th
 window is elsewhere. Docs:
 [the boot-window build](docs/features/dead-window.html#boot-window).
 
+The boot-window build was flashed on 2026-10-25 and changed nothing either. A user
+test then narrowed the leak to one action: the same physical key with a **plain
+remap** works on the very first press after a wake, while the **macro** on it leaks
+the factory usage for ~2 s. That fits the code — the per-event handler `0x5D28`
+stages the factory usage from the position-indexed table `0x16B3E` at `0x5D4A`
+before the record is considered, a remap replaces that byte on the first press,
+and a macro cannot: kinds `9`/`0xA`/`0xB` branch at `0x5EC6` into the player arming
+code at `0x6ACE` (macro index in catalog record byte 1, data through flash table
+`0x9C00 + idx*4`, player flags `0x200000B0`/`0x200000B3`). So a macro whose
+structure is not playable yet still has the factory byte to fall back on.
+
+The fourth build therefore reads no clock at all: `analysis/fw_macroguard.py` hooks
+the same funnel and returns before anything is staged when the mode byte says
+wireless, the event is a press, the macro player is idle and the staged action is
+that key's factory usage (derived from `--key CapsLock` → id `0x30` → `0x39`, not
+hardcoded). Wired mode, releases, the macro's own output and every other action are
+byte-for-byte stock; the worst case is that one usage produces nothing. Image
+`0eb37a76…`, exe `e93edd7d…`, built on the image the keyboard runs now
+(`4dd3201c…`) so the arrow cluster survives; 48 image bytes differ from that base,
+not flashed. Docs:
+[the macro guard](docs/features/dead-window.html#macro-guard).
+
 New to the mechanism: the per-key tables are rebuilt by `0x59F0`, whose only callers
 are `0x6BE6` and the link re-init `0x6EB8` (`0x6F16`) — the rebuild belongs to
 link-up, not to boot. The user's own tests show the configuration itself lives in
@@ -326,6 +348,22 @@ the stock catalog, right Alt and the other three keys get their stock roles back
 only the hardware-proven Fn+Right overlay row (`0x16C7E`, Vol+) is kept. Open and
 load-bearing: where the release edge reaches the dispatcher, and the tick's step
 value, which is why the ladder starts with a 500 ms single-key run.
+
+**2026-10-25: the leak has a site, and the site is deleted.** A wake test settled
+the shape: waking with the macro key types CapsLock once, and the next press runs
+the macro; waking with Fn held absorbs it invisibly, because Fn's own factory usage
+is a state code that emits nothing. So it is not a window but one event, handled
+while the per-key record is still empty: `kind == 0 && settings == 0` at `0x5E66`,
+falling into `0x5E80`, emitting the usage staged from `0x16B3E` at `0x5D4A`. The
+macro guard (flashed, `e93edd7d…`) did not stop it, which also proved the staged
+byte never reaches the funnel hook; it additionally reset the MCU on Fn+that key in
+wireless, still unexplained. `analysis/fw_fallback.py` deletes the fallback
+instead: position 18 (id `0x30`) stages `0x00` at `0x16B50`, the
+`cmp.w fp,#0 / beq` bail at `0x5D54` becomes three nops (it only ever guarded the
+67 non-physical scan slots), and the empty-record branch at `0x5E80` jumps to the
+exit. Nine bytes, no clock, no state; the cost is that Fn + that key no longer
+passes CapsLock through. Image `8dcf93e3…`, exe `bd419289…`, built on the image the
+keyboard runs now (`4dd3201c…`). Not flashed.
 
 ## Open threads
 

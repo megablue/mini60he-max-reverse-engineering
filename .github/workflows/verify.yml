@@ -115,3 +115,38 @@ jobs:
           assert img[0x20030:0x20034] == bytes.fromhex("f2f7d8bb"), "pass branch changed"
           assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
           PY
+
+      - name: Rebuild the macro guard and pin it
+        run: |
+          python analysis/fw_macroguard.py --base analysis/out/ci_bake.bin --no-exe --name ci_macroguard
+          python - <<'PY'
+          import hashlib, pathlib
+          want = "795611fdab3e111dc9f50463de38d1b9eda8bb6e84527b95a012fc86b1ac5cb6"
+          got = hashlib.sha256(pathlib.Path("analysis/out/ci_macroguard.bin").read_bytes()).hexdigest()
+          print("ci_macroguard.bin", got)
+          assert got == want, "the macro guard does not reproduce"
+          img = pathlib.Path("analysis/out/ci_macroguard.bin").read_bytes()
+          assert img[0x127E0:0x127E4] == bytes.fromhex("0df00ebc"), "hook changed"
+          assert img[0x20000:0x2002C] == bytes.fromhex(
+              "2de9f05f0a48007868b108480078392809d108480078012805d1"
+              "07480078002801d1bde8f08ff2f7ddbb00bf"), "stub code changed"
+          assert img[0x2002C:0x2003C] == bytes.fromhex(
+              "8c0000207803002090000020b3000020"), "literals changed"
+          assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
+          PY
+
+      - name: Rebuild the fallback removal and pin it
+        run: |
+          python analysis/fw_fallback.py --base analysis/out/ci_bake.bin --no-exe --name ci_fallback
+          python - <<'PY'
+          import hashlib, pathlib
+          want = "5031e302e085aff6c4d0b4290d520da32230ab98446d1fdb2f31005386403060"
+          got = hashlib.sha256(pathlib.Path("analysis/out/ci_fallback.bin").read_bytes()).hexdigest()
+          print("ci_fallback.bin", got)
+          assert got == want, "the fallback removal does not reproduce"
+          img = pathlib.Path("analysis/out/ci_fallback.bin").read_bytes()
+          assert img[0x16B50] == 0x00, "position 18 still stages a factory usage"
+          assert img[0x5D54:0x5D5A] == bytes.fromhex("00bf00bf00bf"), "bail not removed"
+          assert img[0x5E80:0x5E84] == bytes.fromhex("00f010b8"), "empty branch not redirected"
+          assert len(img) == 0x7E000 and img[-4:] == bytes.fromhex("5555aaaa")
+          PY

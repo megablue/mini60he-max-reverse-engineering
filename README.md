@@ -297,6 +297,7 @@ transcripts and the built installers land, and every one of them is reproducible
 | `fw_names.py` | the shared usage vocabulary (HID names + aliases such as `Fn`, `RightArrow`, `Bksp`) |
 | `fw_deadwin.py` | the first code patch: hooks the report funnel `0x127E0`, adds a 64-byte stub that drops keys for 2 s after a wireless wake |
 | `fw_bootwin.py` | the same hook with an uptime predicate instead of an idle gap: drops wireless keys while `0 < now <= 2500 ms`, so a reboot cannot hide from it |
+| `fw_fallback.py` | removes the factory-usage fallback instead of timing it: the leaking scan position stages nothing and a key whose per-key record is empty emits nothing |
 | `fw_deadwin_probe.py` | the marker twin of that stub: same hook and timer, but it writes `a`/`q`/`w` into the action byte so the device reports which input lied |
 | `fw_bake3.py` | builds the earlier hand-written bake: applies the edit list, asserts anchors, wraps the exe |
 | `mkflasher.py` | generic wrapper: any `0x7E000` image -> patched updater + manifest |
