@@ -377,6 +377,21 @@ carries one new Fn row: `0x16C40` `3a c1 -> 50 ba`, i.e. `Fn` + Left = Volume Do
 Image `ecb236fb…`, exe `0a61d1e7…`, 23 bytes below stock, no hook, blank stub band.
 `fw_fallback.py` now refuses any base whose `0x127E0` is not the stock `push.w`
 unless `--allow-hook` is passed, so an inherited code patch cannot ride along again.
+The release was re-cut in place on 2026-10-26 and the owner reflashed it that day.
+
+**The first press after a wireless wake: accepted, not solved.** Waking with a
+macro key now types nothing and the macro runs on the next press. Making that
+*first* press run the macro was pursued through five falsified hypotheses (funnel
+hook, dispatcher gate `0x37E6`, inner gate `0x5AAC` in `0x5A00`, the empty-record
+branch `0x5E80` with a deferred replay, and the staged factory byte at `0x16B50`).
+The emitter turned out to be a settings filler at `0x10978`: it walks all 168 scan
+positions and, for any key without settings, synthesises a record from
+`0x16B3E[position]` into the settings mirror `0x200026AE`. The macro key therefore
+gets a factory record before its own settings arrive, so at that instant the macro
+genuinely is not in RAM. Owner decision 2026-10-26: accept the silent first press.
+The only route left is to bake per-key settings into the image (Tier B), which needs
+the settings/macro record format reversed. Details, probes and hashes:
+[Removing the fallback](docs/features/dead-window.html#first-press).
 
 ## Open threads
 

@@ -18,7 +18,7 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 <body>
 <article class="map page">
 <h1>The wireless dead window — drop the first 2 s of keys after a wake</h1>
-<p class="status">Status: solved on hardware (2026-10-25) — the wake leak was the factory-value fallback for an empty per-key record, and deleting it fixed the first press after a wireless wake; the 2026-10-26 release build starts from the clean arrow bake (dropping an inherited 30 s idle dropper that swallowed keys) and adds <code>Fn</code>+Left = Volume Down (<a href="#fallback">removing the fallback</a>) · Read when: the first press after a wireless wake carries the wrong (factory) binding, planning a wireless-only gate, or asking where a key report can be dropped before it reaches the host</p>
+<p class="status">Status: solved on hardware (2026-10-25) and shipped (2026-10-26) — the wake leak was a factory-value fallback supplied by the settings filler, and deleting it removed the wrong key; the remaining limitation, that the first press after a wireless wake is silent instead of running its macro, is accepted and documented at <a href="#first-press">the first press</a> · Read when: the first press after a wireless wake carries the wrong (factory) binding, asking why that first press does nothing, planning a wireless-only gate, or asking where a key report can be dropped before it reaches the host</p>
 
 <section id="what-it-is">
   <h2>What it is</h2>
@@ -350,6 +350,9 @@ table{border-collapse:collapse;width:100%}th,td{border:1px solid #d8dee9;padding
 </pre>
   <p>and <code>0x109D8</code> writes into <code>0x200026AE</code> — the <em>settings</em> mirror, not the catalog. So on a settings apply, every key that has no entry yet is given a synthetic record built from its factory usage. For the macro key that is <code>0x39</code>: CapsLock. Its own settings arrive after that pass, which is exactly the "first press is factory, second press is the macro" behaviour, and it is why every hook placed in the key handlers stayed silent — the press is answered from tables this filler had just populated, and the deferral never saw an empty record.</p>
   <p>Consequence for the goal: no table or handler edit can make that first press run the macro, because at that instant the firmware genuinely does not have the macro yet. The two honest ways forward are to bake the per-key settings into the image (so they exist before the filler runs — the Tier-B route, which needs the settings record format reversed) or to accept the current behaviour.</p>
+  <h3>Accepted (2026-10-26)</h3>
+  <p>Accepting it. What ships is: the first press after a wireless wake produces <strong>nothing</strong>, and the next press runs the macro normally. That is a deliberate, bounded limitation — a silent key instead of a wrong one — and the goal of "the macro runs on that first press" is parked behind the settings-format work in the backlog, not behind another key-pipeline hook.</p>
+  <p>Everything tried on the way is recorded above so it is not repeated: the report funnel (<code>0x127E0</code>), the dispatcher gate (<code>0x37E6</code>), the inner gate in <code>0x5A00</code> (<code>0x5AAC</code>), the empty-record branch (<code>0x5E80</code>) with a deferred replay, and the staged factory byte. Each was falsified on hardware; the emitter turned out to be the settings filler at <code>0x10978</code>, which runs before the press is handled.</p>
 </section>
 
 <section id="not-established">
